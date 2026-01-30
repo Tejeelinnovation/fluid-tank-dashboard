@@ -18,8 +18,9 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
-      "cd tank-dashboard@/*": ["./src/*"]
+      "@/*": ["src/*"]
     }
   },
   "include": [

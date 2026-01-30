@@ -1,0 +1,24 @@
+{
+  "companies": [
+    {
+      "id": "e21a6e49-5ead-4ef3-9e4f-29215a32de3f",
+      "name": "Bloom",
+      "slug": "bloom",
+      "companyLoginId": "Bloom01",
+      "passwordHash": "$2b$10$8LO4vvjL5PpEg1FH3gBkm.ulUsUl0pUwALjYYr5Yqye18dGLK/7eG",
+      "tanksCount": 8,
+      "tankCapacities": [
+        1000,
+        1000,
+        1000,
+        10000,
+        1000,
+        1000,
+        1000,
+        100
+      ],
+      "dataMode": "generated",
+      "createdAt": "2026-01-30T15:18:28.065Z"
+    }
+  ]
+}
