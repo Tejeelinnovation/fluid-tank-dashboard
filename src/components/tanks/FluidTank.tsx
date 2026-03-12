@@ -4,6 +4,7 @@ import * as React from "react";
 import { motion, useMotionValue, animate, useAnimationFrame } from "framer-motion";
 
 type Variant = "rect" | "cylinder";
+type Surface = "wave" | "flat";
 
 type FluidTankProps = {
   level: number; // 0..100 (target level)
@@ -12,7 +13,11 @@ type FluidTankProps = {
   height?: number;
   smoothMs?: number; // how long to smoothly move to new level
   capacityLiters?: number; // tank full capacity
-  unit?: "L" | "KL";       // display unit
+  unit?: "L" | "KL"; // display unit
+
+  // ✅ NEW
+  alarm?: boolean; // if true, liquid turns red
+  surface?: Surface; // "flat" -> flat water top, "wave" -> waves
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -25,8 +30,10 @@ export default function FluidTank({
   width = 220,
   height = 260,
   smoothMs = 1200,
-  capacityLiters = 1000, // default 1000 L
+  capacityLiters = 1000,
   unit = "L",
+  alarm = false,
+  surface = "flat", // ✅ default flat (as you requested)
 }: FluidTankProps) {
   const pad = 12;
   const innerW = width - pad * 2;
@@ -43,7 +50,7 @@ export default function FluidTank({
     const target = clamp(level, 0, 100);
     const controls = animate(mvLevel, target, {
       duration: smoothMs / 1000,
-      ease: [0.22, 1, 0.36, 1], // smooth loader ease
+      ease: [0.22, 1, 0.36, 1],
     });
     return () => controls.stop();
   }, [level, mvLevel, smoothMs]);
@@ -52,23 +59,37 @@ export default function FluidTank({
   const uid = React.useId();
   const clipId = `clip-${uid}`;
   const liquidGradId = `liq-${uid}`;
+  const alarmGradId = `alarm-${uid}`;
   const glassId = `glass-${uid}`;
   const glossGradId = `gloss-${uid}`;
-
-  // Wave params tuned for the clean "image-like" surface
-  const waveAmp = 12;          // amplitude
-  const waveLen = 140;         // long waves like your reference
-  const speedPxPerSec = 40;    // calm movement (realistic)
 
   const [frontD, setFrontD] = React.useState<string>("");
   const [backD, setBackD] = React.useState<string>("");
   const [shownPct, setShownPct] = React.useState<number>(clamp(level, 0, 100));
 
-  // === VOLUME CALCULATION (NEW) ===
+  // === VOLUME CALCULATION ===
   const litersNow = (shownPct / 100) * capacityLiters;
   const displayValue = unit === "KL" ? litersNow / 1000 : litersNow;
   const displayUnit = unit === "KL" ? "kL" : "L";
 
+  // ============================
+  // A) FLAT SURFACE MODE (NEW)
+  // ============================
+  const buildFlatPath = (topY: number) => {
+    const x0 = pad;
+    const x1 = pad + innerW;
+    const yBottom = pad + innerH;
+    // Simple rectangle fill with flat top
+    return `M ${x0} ${topY} L ${x1} ${topY} L ${x1} ${yBottom} L ${x0} ${yBottom} Z`;
+  };
+
+  // =====================================================
+  // B) WAVE SURFACE MODE (OLD) — kept for future reuse
+  // =====================================================
+  // Wave params tuned for the clean "image-like" surface
+  const waveAmp = 12; // amplitude
+  const waveLen = 140; // long waves like your reference
+  const speedPxPerSec = 40; // calm movement
 
   // Clean smooth wave path (no spikes, no meniscus)
   const buildCleanWavePath = (topY: number, phase: number, amp: number) => {
@@ -92,6 +113,9 @@ export default function FluidTank({
     return d;
   };
 
+  // ============================
+  // MAIN ANIMATION FRAME
+  // ============================
   useAnimationFrame((t) => {
     const lvlNow = clamp(mvLevel.get(), 0, 100);
     setShownPct(lvlNow);
@@ -104,6 +128,15 @@ export default function FluidTank({
     const topMargin = 6;
     const topY = Math.max(pad + topMargin, rawTopY);
 
+    if (surface === "flat") {
+      // ✅ Flat fill: both layers same
+      const d = buildFlatPath(topY);
+      setBackD(d);
+      setFrontD(d);
+      return;
+    }
+
+    // ========= WAVE MODE =========
     // Horizontal movement phase
     const phase = -((t / 1000) * speedPxPerSec) % waveLen;
 
@@ -112,6 +145,8 @@ export default function FluidTank({
     // Front wave
     setFrontD(buildCleanWavePath(topY, phase, waveAmp));
   });
+
+  const liquidGradToUse = alarm ? alarmGradId : liquidGradId;
 
   return (
     <div className="relative select-none">
@@ -122,11 +157,18 @@ export default function FluidTank({
             <stop offset="100%" stopColor="rgba(255,255,255,0.02)" />
           </linearGradient>
 
-          {/* KEEP YOUR COLORS — unchanged */}
+          {/* NORMAL (BLUE) */}
           <linearGradient id={liquidGradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="rgba(120, 245, 255, 0.90)" />
             <stop offset="55%" stopColor="rgba(0, 210, 255, 0.70)" />
             <stop offset="100%" stopColor="rgba(0, 120, 255, 0.62)" />
+          </linearGradient>
+
+          {/* ✅ ALARM (RED) */}
+          <linearGradient id={alarmGradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255, 140, 140, 0.92)" />
+            <stop offset="55%" stopColor="rgba(255, 60, 60, 0.75)" />
+            <stop offset="100%" stopColor="rgba(180, 0, 0, 0.62)" />
           </linearGradient>
 
           <linearGradient id={glossGradId} x1="0" y1="0" x2="1" y2="0">
@@ -149,7 +191,7 @@ export default function FluidTank({
           height={height - 4}
           rx={outerRx}
           fill={`url(#${glassId})`}
-          stroke="rgba(255,255,255,0.16)"
+          stroke={alarm ? "rgba(255,80,80,0.30)" : "rgba(255,255,255,0.16)"}
           strokeWidth="2"
         />
 
@@ -178,12 +220,12 @@ export default function FluidTank({
         {/* Liquid */}
         <g clipPath={`url(#${clipId})`}>
           {/* BACK layer (depth) */}
-          <motion.path d={backD} fill={`url(#${liquidGradId})`} opacity={0.55} />
+          <motion.path d={backD} fill={`url(#${liquidGradToUse})`} opacity={0.55} />
 
           {/* FRONT layer */}
-          <motion.path d={frontD} fill={`url(#${liquidGradId})`} opacity={0.95} />
+          <motion.path d={frontD} fill={`url(#${liquidGradToUse})`} opacity={0.95} />
 
-          {/* OPTIONAL bubbles (remove if you want none) */}
+          {/* OPTIONAL bubbles (you can keep even with flat) */}
           <motion.circle
             cx={pad + innerW * 0.72}
             cy={pad + innerH * 0.22}
@@ -215,15 +257,17 @@ export default function FluidTank({
       </svg>
 
       {/* Volume badge */}
-<div className="absolute inset-0 flex items-center justify-center">
-  <div
-    className="px-3 py-1 rounded-full text-xs font-semibold
-               bg-white/10 text-white border border-white/10 backdrop-blur"
-  >
-    {displayValue.toFixed(unit === "KL" ? 2 : 0)} {displayUnit}
-  </div>
-</div>
-
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className={[
+            "px-3 py-1 rounded-full text-xs font-semibold",
+            "bg-white/10 text-white border backdrop-blur",
+            alarm ? "border-red-500/30" : "border-white/10",
+          ].join(" ")}
+        >
+          {displayValue.toFixed(unit === "KL" ? 2 : 0)} {displayUnit}
+        </div>
+      </div>
     </div>
   );
 }
