@@ -153,7 +153,7 @@ export default function AdminDashboardPage() {
                   <input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Akshar Enterprise"
+                    placeholder="e.g. Ekatva tech"
                     className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
                                placeholder:text-white/25 focus:border-white/20"
                   />
