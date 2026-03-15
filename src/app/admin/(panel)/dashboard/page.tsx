@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import BackgroundFX from "@/components/ui/BackgroundFX";
 import TopHero from "@/components/ui/TopHero";
 
@@ -11,7 +12,6 @@ type Company = {
   name: string;
   slug: string;
   logoUrl?: string;
-
   companyLoginId: string;
   tanksCount: number;
   dataMode: DataMode;
@@ -32,15 +32,24 @@ export default function AdminDashboardPage() {
   async function load() {
     setErr("");
     setLoadingList(true);
-    const res = await fetch("/api/companies", { cache: "no-store" });
-    const j = await res.json().catch(() => ({}));
-    setLoadingList(false);
-    if (!res.ok) {
-      setErr(j?.error ?? "Failed to load companies");
+
+    try {
+      const res = await fetch("/api/admin/companies", { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErr(j?.error ?? "Failed to load companies");
+        setCompanies([]);
+        return;
+      }
+
+      setCompanies(Array.isArray(j?.companies) ? j.companies : []);
+    } catch {
+      setErr("Failed to load companies");
       setCompanies([]);
-      return;
+    } finally {
+      setLoadingList(false);
     }
-    setCompanies(j.companies ?? []);
   }
 
   useEffect(() => {
@@ -50,53 +59,95 @@ export default function AdminDashboardPage() {
   async function addCompany() {
     setErr("");
     setTempPassword(null);
-    setLoading(true);
 
-    const res = await fetch("/api/admin/companies", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, companyLoginId, logoUrl }),
-    });
+    const cleanName = name.trim();
+    const cleanLoginId = companyLoginId.trim();
+    const cleanLogoUrl = logoUrl.trim();
 
-    const j = await res.json().catch(() => ({}));
-    setLoading(false);
-
-    if (!res.ok) {
-      setErr(j?.error ?? "Failed to create company");
+    if (!cleanName) {
+      setErr("Company name is required");
       return;
     }
 
-    setTempPassword(j?.tempPassword ?? null);
-    setName("");
-    setCompanyLoginId("");
-    setLogoUrl("");
-    await load();
+    if (!cleanLoginId) {
+      setErr("Company Login ID is required");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: cleanName,
+          companyLoginId: cleanLoginId,
+          logoUrl: cleanLogoUrl,
+        }),
+      });
+
+      const j = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErr(j?.error ?? "Failed to create company");
+        return;
+      }
+
+      setTempPassword(j?.tempPassword ?? null);
+      setName("");
+      setCompanyLoginId("");
+      setLogoUrl("");
+      await load();
+    } catch {
+      setErr("Failed to create company");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function removeCompany(id: string) {
     setErr("");
-    const res = await fetch(`/api/companies/${id}`, { method: "DELETE" });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setErr(j?.error ?? "Failed to delete");
-      return;
+
+    try {
+      const res = await fetch(`/api/admin/companies/${id}`, {
+        method: "DELETE",
+      });
+
+      const j = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErr(j?.error ?? "Failed to delete");
+        return;
+      }
+
+      await load();
+    } catch {
+      setErr("Failed to delete");
     }
-    await load();
   }
 
   async function setMode(companyId: string, dataMode: DataMode) {
     setErr("");
-    const res = await fetch("/api/admin/company-mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId, dataMode }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setErr(j?.error ?? "Failed to update mode");
-      return;
+
+    try {
+      const res = await fetch("/api/admin/company-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId, dataMode }),
+      });
+
+      const j = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErr(j?.error ?? "Failed to update mode");
+        return;
+      }
+
+      await load();
+    } catch {
+      setErr("Failed to update mode");
     }
-    await load();
   }
 
   async function logout() {
@@ -105,7 +156,7 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <main className="relative min-h-screen text-white overflow-hidden">
+    <main className="relative min-h-screen overflow-hidden text-white">
       <BackgroundFX />
 
       <div className="relative">
@@ -123,7 +174,7 @@ export default function AdminDashboardPage() {
           ]}
         />
 
-        <div className="mx-auto max-w-6xl px-6 -mt-6">
+        <div className="mx-auto -mt-6 max-w-6xl px-6">
           <button
             onClick={logout}
             className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/80 hover:bg-white/10"
@@ -139,9 +190,8 @@ export default function AdminDashboardPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Create card */}
-            <div className="lg:col-span-1 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 shadow-2xl">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl lg:col-span-1">
               <h2 className="text-lg font-semibold">Create Company</h2>
               <p className="mt-1 text-sm text-white/55">
                 Generate a company login ID + temporary password.
@@ -153,59 +203,61 @@ export default function AdminDashboardPage() {
                   <input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Ekatva tech"
-                    className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
-                               placeholder:text-white/25 focus:border-white/20"
+                    placeholder="e.g. Ekatva Tech"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none placeholder:text-white/25 focus:border-white/20"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs text-white/60">Company Login ID (unique)</label>
+                  <label className="text-xs text-white/60">
+                    Company Login ID (unique)
+                  </label>
                   <input
                     value={companyLoginId}
                     onChange={(e) => setCompanyLoginId(e.target.value)}
-                    placeholder="e.g. akshar_admin"
-                    className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
-                               placeholder:text-white/25 focus:border-white/20"
+                    placeholder="e.g. ekatva_admin"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none placeholder:text-white/25 focus:border-white/20"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs text-white/60">Logo URL (optional)</label>
+                  <label className="text-xs text-white/60">
+                    Logo URL (optional)
+                  </label>
                   <input
                     value={logoUrl}
                     onChange={(e) => setLogoUrl(e.target.value)}
                     placeholder="https://..."
-                    className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
-                               placeholder:text-white/25 focus:border-white/20"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none placeholder:text-white/25 focus:border-white/20"
                   />
                 </div>
 
                 <button
-                  disabled={loading || !name || !companyLoginId}
+                  disabled={loading || !name.trim() || !companyLoginId.trim()}
                   onClick={addCompany}
-                  className="mt-2 w-full rounded-2xl bg-white text-black py-3 font-semibold
-                             disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="mt-2 w-full rounded-2xl bg-white py-3 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? "Creating…" : "Create"}
                 </button>
 
                 {tempPassword && (
                   <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
-                    <div className="text-xs text-emerald-200/80">Temporary password</div>
+                    <div className="text-xs text-emerald-200/80">
+                      Temporary password
+                    </div>
                     <div className="mt-1 font-mono text-sm text-emerald-100">
                       {tempPassword}
                     </div>
                     <div className="mt-2 text-xs text-emerald-200/60">
-                      Copy now and share with the company. It won’t be shown again.
+                      Copy now and share with the company. It won’t be shown
+                      again.
                     </div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* List card */}
-            <div className="lg:col-span-2 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 shadow-2xl">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl lg:col-span-2">
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold">Companies</h2>
@@ -222,40 +274,53 @@ export default function AdminDashboardPage() {
                 {companies.map((c) => (
                   <div
                     key={c.id}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3
-                               rounded-2xl border border-white/10 bg-black/20 px-4 py-3"
+                    className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex min-w-0 items-center gap-3">
                       {c.logoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={c.logoUrl}
                           alt={c.name}
-                          className="h-9 w-24 object-contain rounded bg-white/5 border border-white/10"
+                          className="h-9 w-24 rounded border border-white/10 bg-white/5 object-contain"
                         />
                       ) : (
-                        <div className="h-9 w-24 rounded bg-white/5 border border-white/10 grid place-items-center text-[10px] text-white/60">
+                        <div className="grid h-9 w-24 place-items-center rounded border border-white/10 bg-white/5 text-[10px] text-white/60">
                           NO LOGO
                         </div>
                       )}
 
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate">{c.name}</div>
-                        <div className="text-xs text-white/55 truncate">
-                          Login ID: <span className="text-white/80">{c.companyLoginId}</span>
-                          <span className="mx-2">•</span>
-                          Tanks: <span className="text-white/80">{c.tanksCount ?? 0}</span>
+                        <div className="truncate text-sm font-semibold">
+                          {c.name}
                         </div>
-                        <div className="text-xs text-white/45 truncate">
-                          Public: <span className="text-white/70">/c/{c.slug}</span>
+
+                        <div className="truncate text-xs text-white/55">
+                          Login ID:{" "}
+                          <span className="text-white/80">
+                            {c.companyLoginId}
+                          </span>
+                          <span className="mx-2">•</span>
+                          Tanks:{" "}
+                          <span className="text-white/80">
+                            {c.tanksCount ?? 0}
+                          </span>
+                        </div>
+
+                        <div className="truncate text-xs text-white/45">
+                          Route:{" "}
+                          <span className="text-white/70">
+                            /company/{c.slug}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 justify-end">
+                    <div className="flex items-center justify-end gap-2">
                       <select
                         value={c.dataMode}
-                        onChange={(e) => setMode(c.id, e.target.value as DataMode)}
+                        onChange={(e) =>
+                          setMode(c.id, e.target.value as DataMode)
+                        }
                         className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white"
                         title="Data mode"
                       >
@@ -264,12 +329,12 @@ export default function AdminDashboardPage() {
                         <option value="disabled">Disabled</option>
                       </select>
 
-                      <a
-                        href={`/c/${c.slug}`}
+                      <Link
+                        href={`/company/${c.slug}/setup`}
                         className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/80 hover:bg-white/10"
                       >
                         Open
-                      </a>
+                      </Link>
 
                       <button
                         onClick={() => removeCompany(c.id)}

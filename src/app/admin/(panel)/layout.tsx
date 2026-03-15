@@ -1,12 +1,17 @@
+import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { isAdminLoggedIn } from "@/lib/auth";
 
-export default async function AdminPanelLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const ok = await isAdminLoggedIn();
-  if (!ok) redirect("/admin/login");
+type Props = {
+  children: ReactNode;
+};
+
+export default async function AdminPanelLayout({ children }: Props) {
+  const adminLoggedIn = await isAdminLoggedIn();
+
+  if (!adminLoggedIn) {
+    redirect("/admin/login");
+  }
+
   return <>{children}</>;
 }

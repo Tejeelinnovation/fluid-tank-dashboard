@@ -1,44 +1,55 @@
-import fs from "fs";
-import path from "path";
+import "server-only";
+import { readCompanies, writeCompanies, slugify, type Company } from "./dbCompanies";
 
-export type Company = {
+export type BasicCompany = {
   id: string;
   name: string;
   logoUrl?: string;
 };
 
-const FILE = path.join(process.cwd(), "data", "companies.json");
+export async function getCompanies(): Promise<BasicCompany[]> {
+  const { companies } = await readCompanies();
 
-function readFile(): Company[] {
-  try {
-    const raw = fs.readFileSync(FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return companies.map((company) => ({
+    id: company.id,
+    name: company.name,
+    logoUrl: company.logoUrl,
+  }));
 }
 
-function writeFile(companies: Company[]) {
-  fs.writeFileSync(FILE, JSON.stringify(companies, null, 2), "utf-8");
-}
+export async function addCompany(
+  input: Omit<BasicCompany, "id">
+): Promise<BasicCompany> {
+  const { companies } = await readCompanies();
 
-export function getCompanies(): Company[] {
-  return readFile();
-}
-
-export function addCompany(input: Omit<Company, "id">): Company {
-  const companies = readFile();
   const newCompany: Company = {
     id: crypto.randomUUID(),
     name: input.name.trim(),
+    slug: slugify(input.name),
     logoUrl: input.logoUrl?.trim() || "",
+    companyLoginId: "",
+    passwordHash: "",
+    tanksCount: 0,
+    tankCapacities: [],
+    csvPath: "",
+    dataMode: "generated",
+    createdAt: new Date().toISOString(),
   };
+
   companies.unshift(newCompany);
-  writeFile(companies);
-  return newCompany;
+  await writeCompanies({ companies });
+
+  return {
+    id: newCompany.id,
+    name: newCompany.name,
+    logoUrl: newCompany.logoUrl,
+  };
 }
 
-export function deleteCompany(id: string) {
-  const companies = readFile().filter((c) => c.id !== id);
-  writeFile(companies);
+export async function deleteCompany(id: string) {
+  const { companies } = await readCompanies();
+
+  await writeCompanies({
+    companies: companies.filter((company) => company.id !== id),
+  });
 }

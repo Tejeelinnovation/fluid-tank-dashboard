@@ -1,4 +1,4 @@
-export type TankMetric = "volume" | "temperature";
+/*export type TankMetric = "volume" | "temperature";
 
 export type TankHistoryPoint = {
   date: string;         // YYYY-MM-DD
@@ -71,4 +71,11 @@ export function generateTankHistory(params: {
   }
 
   return points;
-}
+}*/
+export type TankMetric = "volume" | "temperature";
+
+export type TankHistoryPoint = {
+  date: string;
+  volumeL: number;
+  temperatureC: number;
+};

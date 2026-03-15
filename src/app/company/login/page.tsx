@@ -15,26 +15,38 @@ export default function CompanyLoginPage() {
     setErr("");
     setLoading(true);
 
-    const res = await fetch("/api/company/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyLoginId, password }),
-    });
+    try {
+      const res = await fetch("/api/company/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyLoginId, password }),
+      });
 
-    const j = await res.json().catch(() => ({}));
-    setLoading(false);
+      const j = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      setErr(j?.error ?? "Login failed");
-      return;
+      if (!res.ok) {
+        setLoading(false);
+        setErr(j?.error ?? "Login failed");
+        return;
+      }
+
+      const slug = String(j?.slug ?? "").trim();
+
+      if (!slug) {
+        setLoading(false);
+        setErr("Login succeeded but company slug is missing");
+        return;
+      }
+
+      window.location.href = `/company/${slug}/setup`;
+    } catch {
+      setErr("Login failed");
+      setLoading(false);
     }
-
-    // ✅ after login go to setup (or change to /company/dashboard)
-    window.location.href = "/company/setup";
   }
 
   return (
-    <main className="relative min-h-screen text-white overflow-hidden">
+    <main className="relative min-h-screen overflow-hidden text-white">
       <BackgroundFX />
 
       <div className="relative">
@@ -54,7 +66,7 @@ export default function CompanyLoginPage() {
 
         <section className="mx-auto max-w-6xl px-6 pb-24 pt-10">
           <div className="mx-auto max-w-md">
-            <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 shadow-2xl">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold">Sign in</h2>
@@ -75,8 +87,7 @@ export default function CompanyLoginPage() {
                     onChange={(e) => setCompanyLoginId(e.target.value)}
                     placeholder="e.g. abc_admin"
                     autoComplete="username"
-                    className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
-                               placeholder:text-white/25 focus:border-white/20"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none placeholder:text-white/25 focus:border-white/20"
                   />
                 </div>
 
@@ -88,8 +99,7 @@ export default function CompanyLoginPage() {
                     placeholder="Provided by admin"
                     type="password"
                     autoComplete="current-password"
-                    className="mt-2 w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 outline-none
-                               placeholder:text-white/25 focus:border-white/20"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none placeholder:text-white/25 focus:border-white/20"
                   />
                 </div>
 
@@ -102,17 +112,13 @@ export default function CompanyLoginPage() {
                 <button
                   type="submit"
                   disabled={loading || !companyLoginId || !password}
-                  className="w-full rounded-2xl bg-white text-black py-3 font-semibold
-                             disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full rounded-2xl bg-white py-3 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? "Signing in…" : "Login"}
                 </button>
               </form>
-
-              
             </div>
 
-            {/* Footer note */}
             <div className="mt-4 text-center text-xs text-white/45">
               Powered by Tankco • Industrial Monitoring
             </div>
