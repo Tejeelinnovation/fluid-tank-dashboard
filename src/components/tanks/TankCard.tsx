@@ -3,20 +3,30 @@
 import { useEffect, useMemo, useState } from "react";
 import FluidTank from "./FluidTankClient";
 import type { TankAlarmLimits } from "@/types/alarm";
+import type { VolumeUnit, TemperatureUnit } from "@/lib/companySetupClient";
 
 type TankCardProps = {
   id?: string;
   name: string;
-  level: number; // percent 0..100
+  level: number;
   variant?: "rect" | "cylinder";
   temperatureC?: number;
   capacityLiters?: number;
   limits?: TankAlarmLimits;
   onOpen?: () => void;
+  volumeValue?: number;
+  volumeUnit?: VolumeUnit;
+  temperatureValue?: number;
+  temperatureUnit?: TemperatureUnit;
+  alarmActive?: boolean;
+  alarmLabel?: string;
 };
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export default function TankCard({
-  id,
   name,
   level,
   variant = "rect",
@@ -24,62 +34,140 @@ export default function TankCard({
   capacityLiters,
   limits,
   onOpen,
+  volumeValue,
+  volumeUnit = "L",
+  temperatureValue,
+  temperatureUnit = "°C",
+  alarmActive,
+  alarmLabel,
 }: TankCardProps) {
   const [mounted, setMounted] = useState(false);
+
   useEffect(() => setMounted(true), []);
 
   const tempText = useMemo(() => {
     if (!mounted) return "--";
-    if (typeof temperatureC !== "number" || Number.isNaN(temperatureC)) return "--";
-    return temperatureC.toFixed(1);
-  }, [mounted, temperatureC]);
 
-  const nowVol = useMemo(() => {
-    const cap = typeof capacityLiters === "number" ? capacityLiters : 1000;
-    return Math.round((Math.max(0, Math.min(100, level)) / 100) * cap);
+    if (typeof temperatureValue === "number" && Number.isFinite(temperatureValue)) {
+      return temperatureValue.toFixed(1);
+    }
+
+    if (typeof temperatureC !== "number" || Number.isNaN(temperatureC)) {
+      return "--";
+    }
+
+    return temperatureC.toFixed(1);
+  }, [mounted, temperatureValue, temperatureC]);
+
+  const levelPercent = useMemo(() => {
+    if (level <= 100) {
+      return clamp(level, 0, 100);
+    }
+
+    const cap = capacityLiters ?? 1000;
+    return clamp((level / cap) * 100, 0, 100);
   }, [level, capacityLiters]);
 
-  const alarmNow =
-    !!limits &&
-    (
-      (typeof limits.minVolumeL === "number" && nowVol < limits.minVolumeL) ||
-      (typeof limits.maxVolumeL === "number" && nowVol > limits.maxVolumeL) ||
-      (typeof limits.minTempC === "number" &&
-        typeof temperatureC === "number" &&
-        temperatureC < limits.minTempC) ||
-      (typeof limits.maxTempC === "number" &&
-        typeof temperatureC === "number" &&
-        temperatureC > limits.maxTempC)
-    );
+  const nowVol = useMemo(() => {
+    const cap = capacityLiters ?? 1000;
+    return Math.round((levelPercent / 100) * cap);
+  }, [levelPercent, capacityLiters]);
+
+  const displayVolume = useMemo(() => {
+    if (typeof volumeValue === "number" && Number.isFinite(volumeValue)) {
+      return volumeValue;
+    }
+    return nowVol;
+  }, [volumeValue, nowVol]);
+
+  const fallbackAlarmReasons = useMemo(() => {
+    const reasons: string[] = [];
+
+    if (!limits) return reasons;
+
+    if (typeof limits.minVolumeL === "number" && nowVol < limits.minVolumeL) {
+      reasons.push("Low Volume");
+    }
+
+    if (typeof limits.maxVolumeL === "number" && nowVol > limits.maxVolumeL) {
+      reasons.push("High Volume");
+    }
+
+    if (
+      typeof limits.minTempC === "number" &&
+      typeof temperatureC === "number" &&
+      temperatureC < limits.minTempC
+    ) {
+      reasons.push("Low Temp");
+    }
+
+    if (
+      typeof limits.maxTempC === "number" &&
+      typeof temperatureC === "number" &&
+      temperatureC > limits.maxTempC
+    ) {
+      reasons.push("High Temp");
+    }
+
+    return reasons;
+  }, [limits, nowVol, temperatureC]);
+
+  const resolvedAlarmActive =
+    typeof alarmActive === "boolean" ? alarmActive : fallbackAlarmReasons.length > 0;
+
+  const resolvedAlarmLabel =
+    typeof alarmLabel === "string"
+      ? alarmLabel
+      : resolvedAlarmActive
+      ? fallbackAlarmReasons.join(", ")
+      : "Within limits";
 
   return (
     <button
       type="button"
       onClick={onOpen}
       className={[
-        "text-left w-full rounded-2xl p-4 shadow-lg transition",
-        "bg-white/5 border backdrop-blur",
-        alarmNow ? "border-red-500/40 hover:bg-red-500/10" : "border-white/10 hover:bg-white/7",
+        "w-full rounded-2xl border p-4 text-left shadow-lg backdrop-blur transition",
+        resolvedAlarmActive
+          ? "border-red-500/50 bg-red-500/10 ring-1 ring-red-500/20 shadow-red-950/30 hover:bg-red-500/12"
+          : "border-white/10 bg-white/5 hover:bg-white/8",
       ].join(" ")}
     >
-      <div className="flex items-start justify-between mb-3">
+      <div className="mb-3 flex items-start justify-between">
         <div>
           <h2 className="font-semibold text-white">{name}</h2>
-          <p className="text-xs text-white/55 mt-0.5" suppressHydrationWarning>
-            Temp: {tempText}°C
+
+          <p className="mt-0.5 text-xs text-white/60" suppressHydrationWarning>
+            Temp: {tempText}
+            {temperatureUnit}
+          </p>
+
+          <p
+            className={
+              resolvedAlarmActive
+                ? "mt-0.5 text-xs text-red-200"
+                : "mt-0.5 text-xs text-white/45"
+            }
+          >
+            {resolvedAlarmLabel}
           </p>
         </div>
 
-        <span className="text-xs text-white/60">{alarmNow ? "Alarm" : "Live"}</span>
+        <span className={resolvedAlarmActive ? "text-xs text-red-300" : "text-xs text-white/60"}>
+          {resolvedAlarmActive ? "Alarm" : "Live"}
+        </span>
       </div>
 
       <div className="flex justify-center">
         <FluidTank
-          level={level}
+          level={levelPercent}
           capacityLiters={capacityLiters ?? 1000}
-          unit="L"
           variant={variant}
-          alarm={alarmNow}
+          alarm={resolvedAlarmActive}
+          surface="flat"
+          displayValue={displayVolume}
+          displayUnit={volumeUnit}
+          accent="volume"
         />
       </div>
     </button>

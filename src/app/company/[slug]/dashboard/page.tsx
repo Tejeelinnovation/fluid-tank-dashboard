@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import TankGrid, { type Tank, type AlarmEvent } from "@/components/tanks/TankGrid";
 import type { TankAlarmLimits } from "@/types/alarm";
-import { loadAlarmMap } from "@/lib/alarmStore";
+import TopHero from "@/components/ui/TopHero";
+import BackgroundFX from "@/components/ui/BackgroundFX";
+import TankDetailsModal from "@/components/tanks/TankDetailsModal";
 import {
   readCompanySetupClient,
   getVolumeMetric,
@@ -12,16 +15,31 @@ import {
   getTemperatureCFromMetric,
   getVolumeLitersFromMetric,
 } from "@/lib/companySetupClient";
-import TopHero from "@/components/ui/TopHero";
-import BackgroundFX from "@/components/ui/BackgroundFX";
-import TankDetailsModal from "@/components/tanks/TankDetailsModal";
 
 function toNumber(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
 }
 
-export default function DashboardPage() {
+function getAlarmKey(slug: string) {
+  return `tankco_alarm_map_${slug}`;
+}
+
+function loadAlarmMapForSlug(slug: string): Record<string, TankAlarmLimits> {
+  try {
+    const raw = localStorage.getItem(getAlarmKey(slug));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export default function CompanyDashboardPage() {
+  const params = useParams();
+  const slug = String(params?.slug ?? "");
+
   const [tanks, setTanks] = useState<Tank[]>([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
@@ -35,10 +53,12 @@ export default function DashboardPage() {
   }, [tanks, openTankId]);
 
   async function load() {
+    if (!slug) return;
+
     setErr("");
 
     try {
-      const setup = readCompanySetupClient("default");
+      const setup = readCompanySetupClient(slug);
 
       const res = await fetch("/api/influx/latest", { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
@@ -107,25 +127,33 @@ export default function DashboardPage() {
     }
   }
 
+  async function logoutCompany() {
+    await fetch("/api/company/logout", { method: "POST" }).catch(() => {});
+    window.location.href = "/company/login";
+  }
+
   useEffect(() => {
+    if (!slug) return;
+
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
-  const refresh = () => setAlarmMap(loadAlarmMap());
-  refresh();
+    if (!slug) return;
 
-  window.addEventListener("storage", refresh);
-  window.addEventListener("tankco:alarm-limits-changed", refresh as EventListener);
+    const refresh = () => setAlarmMap(loadAlarmMapForSlug(slug));
+    refresh();
 
-  return () => {
-    window.removeEventListener("storage", refresh);
-    window.removeEventListener("tankco:alarm-limits-changed", refresh as EventListener);
-  };
-}, []);
+    window.addEventListener("storage", refresh);
+    window.addEventListener("tankco:alarm-limits-changed", refresh as EventListener);
 
+    return () => {
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("tankco:alarm-limits-changed", refresh as EventListener);
+    };
+  }, [slug]);
 
   return (
     <main className="relative min-h-screen overflow-hidden text-white">
@@ -134,15 +162,26 @@ export default function DashboardPage() {
       <div className="relative">
         <TopHero
           brand="Tankco."
-          eyebrow="DASHBOARD"
+          ctaLabel="Logout"
+          onCtaClickHref="/company/login"
+          eyebrow="COMPANY DASHBOARD"
           titleLine1="Tank"
           titleLine2="Dashboard"
           subtitle="Live values from InfluxDB using fixed volume and temperature channels configured by the admin."
           navItems={[
-            { label: "Setup", href: "/company/default/setup" },
+            { label: "Setup", href: `/company/${slug}/setup` },
             { label: "Tanks", href: "#tanks" },
           ]}
         />
+
+        <div className="mx-auto -mt-6 max-w-6xl px-6">
+          <button
+            onClick={logoutCompany}
+            className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/80 hover:bg-white/10"
+          >
+            Logout
+          </button>
+        </div>
 
         <section id="tanks" className="mx-auto max-w-6xl px-6 pb-20 pt-10">
           <div className="flex items-end justify-between gap-4">

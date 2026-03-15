@@ -1,6 +1,88 @@
 {
   "companies": [
     {
+      "id": "372316bb-6ce6-4f91-a1d8-d9fb17757945",
+      "name": "Ekatva",
+      "slug": "ekatva-4",
+      "companyLoginId": "Ekatva4",
+      "passwordHash": "$2b$10$G5M1zNVfQ.gYzMANCguHYeN6jp7P8n6YTz341tHJ56SrdBn/9U4ze",
+      "tanksCount": 4,
+      "tankCapacities": [
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "dataMode": "generated",
+      "createdAt": "2026-03-14T11:51:51.669Z"
+    },
+    {
+      "id": "2d37b8cc-d561-4463-89d3-8ac67c320174",
+      "name": "ekatva",
+      "slug": "ekatva-3",
+      "companyLoginId": "ekatva3",
+      "passwordHash": "$2b$10$oV0q.PZHTIEbqeXTvsg2D.Gbj4zH6TPXlKt5uooWYDx7l6qzmyqFW",
+      "tanksCount": 10,
+      "tankCapacities": [
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "dataMode": "generated",
+      "createdAt": "2026-03-14T06:48:00.372Z"
+    },
+    {
+      "id": "51d7b336-1722-4c5e-8a71-0c9913ea1b61",
+      "name": "ekatva",
+      "slug": "ekatva-2",
+      "companyLoginId": "ekatva2",
+      "passwordHash": "$2b$10$z7IYz8aFpy/yXrTIOh5fCeUVD74jYLAmbo5ZUe5gcrKR/SVDNbmja",
+      "tanksCount": 10,
+      "tankCapacities": [
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "dataMode": "generated",
+      "createdAt": "2026-03-14T06:37:23.629Z"
+    },
+    {
+      "id": "3adc2e46-5ebd-4dcd-954d-cb57e0c57126",
+      "name": "Bloom",
+      "slug": "bloom-5",
+      "companyLoginId": "Bloom3",
+      "passwordHash": "$2b$10$W.XXJxgXTh20lP76phUfseZkAa3csM5lEFENgvc39fbRQDH0PWRA2",
+      "tanksCount": 10,
+      "tankCapacities": [
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        10000,
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "dataMode": "generated",
+      "createdAt": "2026-03-13T19:58:15.993Z"
+    },
+    {
       "id": "f9031d13-d522-4c19-affb-f2ae7d4fbf06",
       "name": "Bloom",
       "slug": "bloom-4",

@@ -9,11 +9,27 @@ export default function AdminCompaniesPage() {
   const [name, setName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function load() {
-    const res = await fetch("/api/companies");
-    const j = await res.json();
-    setCompanies(j.companies ?? []);
+    setErr("");
+
+    try {
+      const res = await fetch("/api/admin/companies", {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr(j?.error ?? "Failed to load companies");
+        return;
+      }
+
+      const j = await res.json();
+      setCompanies(j.companies ?? []);
+    } catch {
+      setErr("Failed to load companies");
+    }
   }
 
   useEffect(() => {
@@ -22,32 +38,61 @@ export default function AdminCompaniesPage() {
 
   async function addCompany() {
     setErr("");
-    const res = await fetch("/api/companies", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, logoUrl }),
-    });
 
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setErr(j?.error ?? "Failed");
+    if (!name.trim()) {
+      setErr("Company name is required");
       return;
     }
 
-    setName("");
-    setLogoUrl("");
-    await load();
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          logoUrl: logoUrl.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr(j?.error ?? "Failed to create company");
+        return;
+      }
+
+      setName("");
+      setLogoUrl("");
+      await load();
+    } catch {
+      setErr("Failed to create company");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function removeCompany(id: string) {
     setErr("");
-    const res = await fetch(`/api/companies/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setErr(j?.error ?? "Failed");
-      return;
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/api/admin/companies/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr(j?.error ?? "Failed to remove company");
+        return;
+      }
+
+      await load();
+    } catch {
+      setErr("Failed to remove company");
+    } finally {
+      setLoading(false);
     }
-    await load();
   }
 
   async function logout() {
@@ -75,7 +120,6 @@ export default function AdminCompaniesPage() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2">
-          {/* Add company */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <h2 className="text-sm font-semibold text-white">Add Company</h2>
 
@@ -97,14 +141,14 @@ export default function AdminCompaniesPage() {
 
               <button
                 onClick={addCompany}
-                className="w-full rounded-xl bg-white py-3 font-semibold text-black"
+                disabled={loading}
+                className="w-full rounded-xl bg-white py-3 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Add
+                {loading ? "Please wait..." : "Add"}
               </button>
             </div>
           </div>
 
-          {/* Company list */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <h2 className="text-sm font-semibold text-white">All Companies</h2>
 
@@ -121,7 +165,6 @@ export default function AdminCompaniesPage() {
                   >
                     <div className="flex items-center gap-3">
                       {c.logoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={c.logoUrl}
                           alt={c.name}
@@ -140,7 +183,8 @@ export default function AdminCompaniesPage() {
 
                     <button
                       onClick={() => removeCompany(c.id)}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10"
+                      disabled={loading}
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Remove
                     </button>

@@ -1,4 +1,4 @@
-import "server-only";
+/*import "server-only";
 
 export function generateTankData(
   tanksCount: number,
@@ -15,4 +15,10 @@ export function generateTankData(
       temperatureC: +(25 + Math.random() * 15).toFixed(1), // 25–40°C
     };
   });
+}*/
+
+import "server-only";
+
+export function generateTankData() {
+  return [];
 }
