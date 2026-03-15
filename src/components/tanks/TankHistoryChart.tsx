@@ -11,53 +11,51 @@ import {
   CartesianGrid,
   ReferenceLine,
 } from "recharts";
-import type { TankMetric, TankHistoryPoint } from "@/lib/tankHistoryGenerator";
-import type { TankAlarmLimits } from "@/types/alarm";
 
-type ChartPoint = TankHistoryPoint & { __alarm?: boolean };
+type TankMetric = "volume" | "temperature";
+
+type ChartPoint = {
+  date: string;
+  value: number;
+  alarm: boolean;
+};
 
 export default function TankHistoryChart({
   data,
   metric,
-  limits,
+  unitLabel,
+  minLine,
+  maxLine,
 }: {
   data: ChartPoint[];
   metric: TankMetric;
-  limits?: TankAlarmLimits;
+  unitLabel: string;
+  minLine?: number;
+  maxLine?: number;
 }) {
-  const key = metric === "volume" ? "volumeL" : "temperatureC";
-  const unit = metric === "volume" ? "L" : "°C";
-
-  // Only enable alarm visuals if that metric has limits set
   const hasMetricLimits =
-    metric === "volume"
-      ? typeof limits?.minVolumeL === "number" || typeof limits?.maxVolumeL === "number"
-      : typeof limits?.minTempC === "number" || typeof limits?.maxTempC === "number";
+    typeof minLine === "number" || typeof maxLine === "number";
 
-  // Build two series: normal + alarm (alarm has values only where __alarm=true)
   const chartData = React.useMemo(() => {
-    return (data ?? []).map((p) => {
-      const v = (p as any)[key] as number;
+    return (data ?? []).map((p) => ({
+      ...p,
+      __normal: p.alarm ? null : p.value,
+      __alarmSeg: p.alarm ? p.value : null,
+    }));
+  }, [data]);
 
-      const alarm = !!p.__alarm && hasMetricLimits;
-
-      return {
-        ...p,
-        __normal: alarm ? null : v,
-        __alarmSeg: alarm ? v : null,
-      };
-    });
-  }, [data, key, hasMetricLimits]);
-
-  const minLine =
-    metric === "volume" ? limits?.minVolumeL : limits?.minTempC;
-  const maxLine =
-    metric === "volume" ? limits?.maxVolumeL : limits?.maxTempC;
+  const lineColor =
+    metric === "temperature"
+      ? "rgba(255,180,90,0.95)"
+      : "rgba(120,245,255,0.95)";
 
   return (
-    <div className="h-[220px] sm:h-[280px] w-full rounded-2xl border border-white/10 bg-white/5 p-3">
+    <div className="h-[220px] w-full rounded-2xl border border-white/10 bg-white/5 p-3 sm:h-[280px]">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 12, right: 12, left: 0, bottom: 8 }}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+        >
           <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
 
           <XAxis
@@ -68,7 +66,8 @@ export default function TankHistoryChart({
 
           <YAxis
             tick={{ fill: "rgba(255,255,255,0.55)", fontSize: 11 }}
-            width={36}
+            width={42}
+            domain={["auto", "auto"]}
           />
 
           <Tooltip
@@ -80,18 +79,20 @@ export default function TankHistoryChart({
               backdropFilter: "blur(10px)",
             }}
             labelStyle={{ color: "rgba(255,255,255,0.75)" }}
-            formatter={(value: any) => [`${value} ${unit}`, metric === "volume" ? "Volume" : "Temp"]}
+            formatter={(value: any) => [
+              `${value} ${unitLabel}`,
+              metric === "volume" ? "Volume" : "Temperature",
+            ]}
           />
 
-          {/* ===== DOTTED LIMIT REFERENCE LINES (ONLY IF SET FOR THIS METRIC) ===== */}
-          {hasMetricLimits && typeof minLine === "number" ? (
+          {typeof minLine === "number" ? (
             <ReferenceLine
               y={minLine}
               stroke="rgba(255,80,80,0.85)"
               strokeDasharray="4 4"
               ifOverflow="extendDomain"
               label={{
-                value: metric === "volume" ? `Min Vol (${minLine}L)` : `Min Temp (${minLine}°C)`,
+                value: `Min (${minLine}${unitLabel})`,
                 position: "insideTopLeft",
                 fill: "rgba(255,120,120,0.85)",
                 fontSize: 10,
@@ -99,14 +100,14 @@ export default function TankHistoryChart({
             />
           ) : null}
 
-          {hasMetricLimits && typeof maxLine === "number" ? (
+          {typeof maxLine === "number" ? (
             <ReferenceLine
               y={maxLine}
               stroke="rgba(255,80,80,0.85)"
               strokeDasharray="4 4"
               ifOverflow="extendDomain"
               label={{
-                value: metric === "volume" ? `Max Vol (${maxLine}L)` : `Max Temp (${maxLine}°C)`,
+                value: `Max (${maxLine}${unitLabel})`,
                 position: "insideTopLeft",
                 fill: "rgba(255,120,120,0.85)",
                 fontSize: 10,
@@ -114,29 +115,32 @@ export default function TankHistoryChart({
             />
           ) : null}
 
-          {/* ===== NORMAL LINE (CYAN) ===== */}
           <Line
             type="monotone"
             dataKey="__normal"
-            stroke="rgba(120, 245, 255, 0.9)"
-            strokeWidth={2.5}
+            stroke={lineColor}
+            strokeWidth={2.8}
             dot={false}
             activeDot={{ r: 4 }}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
-          {/* ===== ALARM SEGMENTS (RED) + RED DOTS ===== */}
           <Line
             type="monotone"
             dataKey="__alarmSeg"
-            stroke="rgba(255,80,80,0.95)"
-            strokeWidth={2.8}
+            stroke="rgba(255,80,80,0.96)"
+            strokeWidth={3}
             connectNulls={false}
+            isAnimationActive={false}
             dot={(props: any) => {
-              const { cx, cy } = props;
+              const { cx, cy, payload } = props;
+
               if (!hasMetricLimits) return null;
+              if (!payload || payload.__alarmSeg == null) return null;
               if (typeof cx !== "number" || typeof cy !== "number") return null;
-              return <circle cx={cx} cy={cy} r={3.8} fill="rgba(255,80,80,0.95)" />;
+
+              return <circle cx={cx} cy={cy} r={4} fill="rgba(255,80,80,0.96)" />;
             }}
             activeDot={{ r: 5 }}
           />

@@ -5,23 +5,36 @@ import { motion, useMotionValue, animate, useAnimationFrame } from "framer-motio
 
 type Variant = "rect" | "cylinder";
 type Surface = "wave" | "flat";
+type Accent = "volume" | "temperature";
 
 type FluidTankProps = {
-  level: number; // 0..100 (target level)
+  level: number;
   variant?: Variant;
   width?: number;
   height?: number;
-  smoothMs?: number; // how long to smoothly move to new level
-  capacityLiters?: number; // tank full capacity
-  unit?: "L" | "KL"; // display unit
-
-  // ✅ NEW
-  alarm?: boolean; // if true, liquid turns red
-  surface?: Surface; // "flat" -> flat water top, "wave" -> waves
+  smoothMs?: number;
+  capacityLiters?: number;
+  unit?: "L" | "KL";
+  alarm?: boolean;
+  surface?: Surface;
+  displayValue?: number;
+  displayUnit?: string;
+  accent?: Accent;
 };
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function formatDisplayValue(value: number, unitLabel: string) {
+  if (!Number.isFinite(value)) return `-- ${unitLabel}`;
+  const digits =
+    unitLabel === "m³" || unitLabel === "KL"
+      ? 2
+      : unitLabel === "%"
+      ? 1
+      : 1;
+  return `${value.toFixed(digits)} ${unitLabel}`;
 }
 
 export default function FluidTank({
@@ -33,7 +46,10 @@ export default function FluidTank({
   capacityLiters = 1000,
   unit = "L",
   alarm = false,
-  surface = "flat", // ✅ default flat (as you requested)
+  surface = "wave",
+  displayValue,
+  displayUnit,
+  accent = "volume",
 }: FluidTankProps) {
   const pad = 12;
   const innerW = width - pad * 2;
@@ -43,7 +59,6 @@ export default function FluidTank({
   const outerRx = isCylinder ? 22 : 18;
   const innerRx = isCylinder ? 18 : 14;
 
-  // Smooth animated "displayed level"
   const mvLevel = useMotionValue(clamp(level, 0, 100));
 
   React.useEffect(() => {
@@ -55,44 +70,43 @@ export default function FluidTank({
     return () => controls.stop();
   }, [level, mvLevel, smoothMs]);
 
-  // Unique ids (client-only component)
   const uid = React.useId();
   const clipId = `clip-${uid}`;
   const liquidGradId = `liq-${uid}`;
+  const tempGradId = `temp-${uid}`;
   const alarmGradId = `alarm-${uid}`;
   const glassId = `glass-${uid}`;
   const glossGradId = `gloss-${uid}`;
+  const glowId = `glow-${uid}`;
+  const alarmGlowId = `alarm-glow-${uid}`;
 
-  const [frontD, setFrontD] = React.useState<string>("");
-  const [backD, setBackD] = React.useState<string>("");
-  const [shownPct, setShownPct] = React.useState<number>(clamp(level, 0, 100));
+  const [frontD, setFrontD] = React.useState("");
+  const [backD, setBackD] = React.useState("");
+  const [shownPct, setShownPct] = React.useState(clamp(level, 0, 100));
 
-  // === VOLUME CALCULATION ===
   const litersNow = (shownPct / 100) * capacityLiters;
-  const displayValue = unit === "KL" ? litersNow / 1000 : litersNow;
-  const displayUnit = unit === "KL" ? "kL" : "L";
+  const computedDisplayValue = unit === "KL" ? litersNow / 1000 : litersNow;
+  const computedDisplayUnit = unit === "KL" ? "kL" : "L";
 
-  // ============================
-  // A) FLAT SURFACE MODE (NEW)
-  // ============================
+  const shownValue =
+    typeof displayValue === "number" && Number.isFinite(displayValue)
+      ? displayValue
+      : computedDisplayValue;
+
+  const shownUnit = displayUnit ?? computedDisplayUnit;
+
   const buildFlatPath = (topY: number) => {
     const x0 = pad;
     const x1 = pad + innerW;
     const yBottom = pad + innerH;
-    // Simple rectangle fill with flat top
     return `M ${x0} ${topY} L ${x1} ${topY} L ${x1} ${yBottom} L ${x0} ${yBottom} Z`;
   };
 
-  // =====================================================
-  // B) WAVE SURFACE MODE (OLD) — kept for future reuse
-  // =====================================================
-  // Wave params tuned for the clean "image-like" surface
-  const waveAmp = 12; // amplitude
-  const waveLen = 140; // long waves like your reference
-  const speedPxPerSec = 40; // calm movement
+  const waveAmp = accent === "temperature" ? 10 : 12;
+  const waveLen = 140;
+  const speedPxPerSec = accent === "temperature" ? 48 : 40;
 
-  // Clean smooth wave path (no spikes, no meniscus)
-  const buildCleanWavePath = (topY: number, phase: number, amp: number) => {
+  const buildWavePath = (topY: number, phase: number, amp: number) => {
     const startX = -innerW + phase;
     const endX = innerW * 2 + phase;
 
@@ -103,78 +117,106 @@ export default function FluidTank({
       const xMid = x0 + waveLen / 2;
       const x1 = x0 + waveLen;
 
-      // One smooth wave per waveLen (crest then trough)
       d += `C ${x0 + waveLen * 0.25} ${topY - amp}, ${x0 + waveLen * 0.25} ${topY - amp}, ${xMid} ${topY} `;
       d += `C ${x0 + waveLen * 0.75} ${topY + amp}, ${x0 + waveLen * 0.75} ${topY + amp}, ${x1} ${topY} `;
     }
 
-    // Close to bottom
     d += `L ${pad + endX} ${pad + innerH} L ${pad + startX} ${pad + innerH} Z`;
     return d;
   };
 
-  // ============================
-  // MAIN ANIMATION FRAME
-  // ============================
   useAnimationFrame((t) => {
     const lvlNow = clamp(mvLevel.get(), 0, 100);
     setShownPct(lvlNow);
 
-    // Convert level to topY
     const fillH = (lvlNow / 100) * innerH;
     const rawTopY = pad + (innerH - fillH);
-
-    // Prevent weird top artifacts when near full
     const topMargin = 6;
     const topY = Math.max(pad + topMargin, rawTopY);
 
     if (surface === "flat") {
-      // ✅ Flat fill: both layers same
       const d = buildFlatPath(topY);
       setBackD(d);
       setFrontD(d);
       return;
     }
 
-    // ========= WAVE MODE =========
-    // Horizontal movement phase
     const phase = -((t / 1000) * speedPxPerSec) % waveLen;
-
-    // Back wave a bit lower + smaller amplitude
-    setBackD(buildCleanWavePath(topY + 6, phase * 0.85, waveAmp * 0.55));
-    // Front wave
-    setFrontD(buildCleanWavePath(topY, phase, waveAmp));
+    setBackD(buildWavePath(topY + 6, phase * 0.85, waveAmp * 0.55));
+    setFrontD(buildWavePath(topY, phase, waveAmp));
   });
 
-  const liquidGradToUse = alarm ? alarmGradId : liquidGradId;
+  const liquidGradToUse = alarm
+    ? alarmGradId
+    : accent === "temperature"
+    ? tempGradId
+    : liquidGradId;
+
+  const outerStroke = alarm
+    ? "rgba(255,90,90,0.90)"
+    : accent === "temperature"
+    ? "rgba(255,165,90,0.42)"
+    : "rgba(135,225,255,0.34)";
+
+  const innerStroke = alarm
+    ? "rgba(255,70,70,0.85)"
+    : accent === "temperature"
+    ? "rgba(255,160,90,0.36)"
+    : "rgba(120,220,255,0.30)";
 
   return (
     <div className="relative select-none">
-      <svg width={width} height={height} className="block">
+      <svg width={width} height={height} className="block overflow-visible">
         <defs>
+          <filter id={glowId}>
+            <feGaussianBlur stdDeviation="18" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+
+          <filter id={alarmGlowId}>
+            <feGaussianBlur stdDeviation="22" result="blur" />
+            <feColorMatrix
+              in="blur"
+              type="matrix"
+              values="
+                1 0 0 0 0
+                0 0.18 0 0 0
+                0 0 0.18 0 0
+                0 0 0 1 0
+              "
+            />
+          </filter>
+
           <linearGradient id={glassId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.06)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0.02)" />
+            <stop offset="0%" stopColor="rgba(255,255,255,0.09)" />
+            <stop offset="100%" stopColor="rgba(255,255,255,0.03)" />
           </linearGradient>
 
-          {/* NORMAL (BLUE) */}
           <linearGradient id={liquidGradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(120, 245, 255, 0.90)" />
-            <stop offset="55%" stopColor="rgba(0, 210, 255, 0.70)" />
-            <stop offset="100%" stopColor="rgba(0, 120, 255, 0.62)" />
+            <stop offset="0%" stopColor="rgba(130,250,255,0.98)" />
+            <stop offset="40%" stopColor="rgba(0,224,255,0.90)" />
+            <stop offset="100%" stopColor="rgba(0,105,255,0.84)" />
           </linearGradient>
 
-          {/* ✅ ALARM (RED) */}
+          <linearGradient id={tempGradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255,210,90,0.98)" />
+            <stop offset="45%" stopColor="rgba(255,130,70,0.92)" />
+            <stop offset="100%" stopColor="rgba(255,55,120,0.84)" />
+          </linearGradient>
+
           <linearGradient id={alarmGradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(255, 140, 140, 0.92)" />
-            <stop offset="55%" stopColor="rgba(255, 60, 60, 0.75)" />
-            <stop offset="100%" stopColor="rgba(180, 0, 0, 0.62)" />
+            <stop offset="0%" stopColor="rgba(255,170,170,0.99)" />
+            <stop offset="45%" stopColor="rgba(255,70,70,0.96)" />
+            <stop offset="100%" stopColor="rgba(185,0,0,0.92)" />
           </linearGradient>
 
           <linearGradient id={glossGradId} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="rgba(255,255,255,0.00)" />
-            <stop offset="30%" stopColor="rgba(255,255,255,0.10)" />
-            <stop offset="55%" stopColor="rgba(255,255,255,0.04)" />
+            <stop offset="30%" stopColor="rgba(255,255,255,0.18)" />
+            <stop offset="55%" stopColor="rgba(255,255,255,0.06)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0.00)" />
           </linearGradient>
 
@@ -183,7 +225,18 @@ export default function FluidTank({
           </clipPath>
         </defs>
 
-        {/* Outer glass */}
+        {alarm ? (
+          <rect
+            x={-4}
+            y={-4}
+            width={width + 8}
+            height={height + 8}
+            rx={outerRx + 4}
+            fill="rgba(255,40,40,0.10)"
+            filter={`url(#${alarmGlowId})`}
+          />
+        ) : null}
+
         <rect
           x="2"
           y="2"
@@ -191,59 +244,54 @@ export default function FluidTank({
           height={height - 4}
           rx={outerRx}
           fill={`url(#${glassId})`}
-          stroke={alarm ? "rgba(255,80,80,0.30)" : "rgba(255,255,255,0.16)"}
-          strokeWidth="2"
+          stroke={outerStroke}
+          strokeWidth={alarm ? 2.6 : 2}
         />
 
-        {/* Cylinder rims */}
-        {isCylinder && (
-          <>
-            <ellipse
-              cx={width / 2}
-              cy={pad + 2}
-              rx={innerW / 2}
-              ry={10}
-              fill="rgba(255,255,255,0.05)"
-              stroke="rgba(255,255,255,0.10)"
-            />
-            <ellipse
-              cx={width / 2}
-              cy={pad + innerH - 2}
-              rx={innerW / 2}
-              ry={10}
-              fill="rgba(0,0,0,0.20)"
-              opacity={0.25}
-            />
-          </>
-        )}
+        <rect
+          x={pad}
+          y={pad}
+          width={innerW}
+          height={innerH}
+          rx={innerRx}
+          fill="rgba(255,255,255,0.02)"
+          stroke={innerStroke}
+          strokeWidth={alarm ? 2.2 : 1.4}
+        />
 
-        {/* Liquid */}
         <g clipPath={`url(#${clipId})`}>
-          {/* BACK layer (depth) */}
-          <motion.path d={backD} fill={`url(#${liquidGradToUse})`} opacity={0.55} />
+          {surface === "wave" ? (
+            <motion.path
+              d={backD}
+              fill={`url(#${liquidGradToUse})`}
+              opacity={alarm ? 0.76 : 0.62}
+              filter={`url(#${glowId})`}
+            />
+          ) : null}
 
-          {/* FRONT layer */}
-          <motion.path d={frontD} fill={`url(#${liquidGradToUse})`} opacity={0.95} />
+          <motion.path
+            d={frontD}
+            fill={`url(#${liquidGradToUse})`}
+            opacity={alarm ? 1 : 0.98}
+          />
 
-          {/* OPTIONAL bubbles (you can keep even with flat) */}
           <motion.circle
             cx={pad + innerW * 0.72}
             cy={pad + innerH * 0.22}
-            r="2.2"
-            fill="rgba(255,255,255,0.55)"
-            animate={{ y: [0, -10, 0], opacity: [0.2, 0.65, 0.2] }}
-            transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+            r="2.4"
+            fill="rgba(255,255,255,0.72)"
+            animate={{ y: [0, -12, 0], opacity: [0.22, 0.72, 0.22] }}
+            transition={{ duration: 3.1, repeat: Infinity, ease: "easeInOut" }}
           />
           <motion.circle
             cx={pad + innerW * 0.32}
             cy={pad + innerH * 0.35}
-            r="1.6"
-            fill="rgba(255,255,255,0.45)"
-            animate={{ y: [0, -12, 0], opacity: [0.15, 0.55, 0.15] }}
-            transition={{ duration: 4.0, repeat: Infinity, ease: "easeInOut" }}
+            r="1.7"
+            fill="rgba(255,255,255,0.58)"
+            animate={{ y: [0, -14, 0], opacity: [0.16, 0.60, 0.16] }}
+            transition={{ duration: 3.9, repeat: Infinity, ease: "easeInOut" }}
           />
 
-          {/* Glass highlight */}
           <rect
             x={pad + innerW * 0.12}
             y={pad + 8}
@@ -251,21 +299,23 @@ export default function FluidTank({
             height={innerH - 16}
             rx="14"
             fill={`url(#${glossGradId})`}
-            opacity={0.55}
+            opacity={0.7}
           />
         </g>
       </svg>
 
-      {/* Volume badge */}
       <div className="absolute inset-0 flex items-center justify-center">
         <div
           className={[
-            "px-3 py-1 rounded-full text-xs font-semibold",
-            "bg-white/10 text-white border backdrop-blur",
-            alarm ? "border-red-500/30" : "border-white/10",
+            "rounded-full border px-3 py-1 text-xs font-semibold text-white backdrop-blur",
+            alarm
+              ? "border-red-300/60 bg-red-500/28 shadow-[0_0_18px_rgba(255,70,70,0.28)]"
+              : accent === "temperature"
+              ? "border-orange-300/35 bg-orange-400/18"
+              : "border-cyan-300/30 bg-cyan-300/18",
           ].join(" ")}
         >
-          {displayValue.toFixed(unit === "KL" ? 2 : 0)} {displayUnit}
+          {formatDisplayValue(shownValue, shownUnit)}
         </div>
       </div>
     </div>
