@@ -81,9 +81,12 @@ export default function TankDashboardLive() {
     try {
       setLoading(true);
 
-      const settingsRes = await fetch("/api/company/settings", {
-        cache: "no-store",
-      });
+      const settingsRes = await fetch(
+  `/api/company/settings?slug=${encodeURIComponent(slug)}`,
+  {
+    cache: "no-store",
+  }
+);
       const settingsJson = await settingsRes.json().catch(() => ({}));
 
       if (!settingsRes.ok || !settingsJson?.ok) {

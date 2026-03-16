@@ -207,7 +207,7 @@ export default function CompanySetupPage() {
         setInitialLoading(true);
         setMsg(null);
 
-        const res = await fetch("/api/company/settings", {
+        const res = await fetch(`/api/company/settings?slug=${encodeURIComponent(slug)}`, {
           cache: "no-store",
         });
 

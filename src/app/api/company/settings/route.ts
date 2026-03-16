@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/postgres";
 import { getCompanySessionId } from "@/lib/companyAuth";
+import { isAdminLoggedIn } from "@/lib/auth";
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -12,16 +13,73 @@ function numOrNull(value: unknown, fallback?: number) {
   return fallback ?? null;
 }
 
-export async function GET() {
-  try {
-    const companyId = await getCompanySessionId();
+async function findCompanyBySlug(slug: string) {
+  const res = await pool.query(
+    `
+    select id, slug
+    from companies
+    where slug = $1
+    limit 1
+    `,
+    [slug]
+  );
+  return res.rows[0] ?? null;
+}
 
-    if (!companyId) {
+async function resolveCompanyId(req: NextRequest, body?: any) {
+  const url = new URL(req.url);
+  const slugFromQuery = String(url.searchParams.get("slug") || "").trim();
+  const slugFromBody = String(body?.slug || "").trim();
+  const slug = slugFromQuery || slugFromBody;
+
+  if (!slug) {
+    return { error: "Company slug is required" as const };
+  }
+
+  const res = await pool.query(
+    `
+    select id, slug
+    from companies
+    where slug = $1
+    limit 1
+    `,
+    [slug]
+  );
+
+  const company = res.rows[0];
+  if (!company) {
+    return { error: "Company not found" as const };
+  }
+
+  return {
+    companyId: String(company.id),
+    slug: String(company.slug),
+  };
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const adminLoggedIn = await isAdminLoggedIn();
+    const resolved = await resolveCompanyId(req);
+
+    if (!resolved.companyId) {
       return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
+        { ok: false, error: resolved.error || "Unauthorized" },
+        { status: resolved.error === "Company not found" ? 404 : 401 }
       );
     }
+
+    // if slug is used, allow both admin and company view that exact company
+    // if slug is absent, company session is used
+    // admin without slug is not allowed
+    if (adminLoggedIn && !resolved.slug) {
+      return NextResponse.json(
+        { ok: false, error: "Company slug is required for admin access" },
+        { status: 400 }
+      );
+    }
+
+    const companyId = resolved.companyId;
 
     const companyRes = await pool.query(
       `
@@ -91,16 +149,25 @@ export async function POST(req: NextRequest) {
   const client = await pool.connect();
 
   try {
-    const companyId = await getCompanySessionId();
+    const adminLoggedIn = await isAdminLoggedIn();
+    const body = await req.json();
+    const resolved = await resolveCompanyId(req, body);
 
-    if (!companyId) {
+    if (!resolved.companyId) {
       return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
+        { ok: false, error: resolved.error || "Unauthorized" },
+        { status: resolved.error === "Company not found" ? 404 : 401 }
       );
     }
 
-    const body = await req.json();
+    if (adminLoggedIn && !resolved.slug) {
+      return NextResponse.json(
+        { ok: false, error: "Company slug is required for admin access" },
+        { status: 400 }
+      );
+    }
+
+    const companyId = resolved.companyId;
 
     const tanksCount = clamp(Number(body?.tanksCount || 1), 1, 20);
     const tanks = Array.isArray(body?.tanks) ? body.tanks : [];
