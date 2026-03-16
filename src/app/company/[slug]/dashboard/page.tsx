@@ -7,33 +7,71 @@ import type { TankAlarmLimits } from "@/types/alarm";
 import TopHero from "@/components/ui/TopHero";
 import BackgroundFX from "@/components/ui/BackgroundFX";
 import TankDetailsModal from "@/components/tanks/TankDetailsModal";
-import {
-  readCompanySetupClient,
-  getVolumeMetric,
-  getTemperatureMetric,
-  getVolumePercentFromMetric,
-  getTemperatureCFromMetric,
-  getVolumeLitersFromMetric,
-} from "@/lib/companySetupClient";
+
+type VolumeUnit = "L" | "%" | "m³";
+type TemperatureUnit = "°C" | "°F";
+
+type TankSetupItem = {
+  id: string;
+  name: string;
+  capacityLiters: number;
+  variant?: "rect";
+  metrics: [
+    { channel: string; type: "volume"; unit: VolumeUnit },
+    { channel: string; type: "temperature"; unit: TemperatureUnit }
+  ];
+};
 
 function toNumber(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
 }
 
-function getAlarmKey(slug: string) {
-  return `tankco_alarm_map_${slug}`;
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
-function loadAlarmMapForSlug(slug: string): Record<string, TankAlarmLimits> {
-  try {
-    const raw = localStorage.getItem(getAlarmKey(slug));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+function makeDefaultTank(i: number): TankSetupItem {
+  return {
+    id: `tank-${i + 1}`,
+    name: `Tank ${i + 1}`,
+    capacityLiters: 1000,
+    variant: "rect",
+    metrics: [
+      {
+        channel: `CH${i * 2 + 1}`,
+        type: "volume",
+        unit: "L",
+      },
+      {
+        channel: `CH${i * 2 + 2}`,
+        type: "temperature",
+        unit: "°C",
+      },
+    ],
+  };
+}
+
+function convertVolumeToLiters(
+  raw: number,
+  unit: VolumeUnit,
+  capacityLiters: number
+) {
+  if (unit === "L") return raw;
+  if (unit === "%") return (raw / 100) * capacityLiters;
+  if (unit === "m³") return raw * 1000;
+  return raw;
+}
+
+function convertTemperatureToC(raw: number, unit: TemperatureUnit) {
+  if (unit === "°F") return ((raw - 32) * 5) / 9;
+  return raw;
+}
+
+function getVolumePercent(raw: number, unit: VolumeUnit, capacityLiters: number) {
+  const liters = convertVolumeToLiters(raw, unit, capacityLiters);
+  if (!(capacityLiters > 0)) return 0;
+  return clamp((liters / capacityLiters) * 100, 0, 100);
 }
 
 export default function CompanyDashboardPage() {
@@ -41,6 +79,7 @@ export default function CompanyDashboardPage() {
   const slug = String(params?.slug ?? "");
 
   const [tanks, setTanks] = useState<Tank[]>([]);
+  const [setupTanks, setSetupTanks] = useState<TankSetupItem[]>([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
@@ -58,42 +97,138 @@ export default function CompanyDashboardPage() {
     setErr("");
 
     try {
-      const setup = readCompanySetupClient(slug);
+      const settingsRes = await fetch("/api/company/settings", {
+        cache: "no-store",
+      });
+      const settingsJson = await settingsRes.json().catch(() => ({}));
 
-      const res = await fetch("/api/influx/latest", { cache: "no-store" });
-      const j = await res.json().catch(() => ({}));
+      if (!settingsRes.ok || !settingsJson?.ok) {
+        setErr(settingsJson?.error || "Failed to load company settings");
+        setTanks([]);
+        setSetupTanks([]);
+        setAlarmMap({});
+        return;
+      }
 
-      if (!res.ok) {
-        setErr(j?.error || "Failed to load Influx data");
+      const tanksCount = clamp(
+        Number(
+          settingsJson?.company?.tanks_count ??
+            settingsJson?.company?.tanksCount ??
+            4
+        ),
+        1,
+        20
+      );
+
+      const tankCapacities = Array.isArray(settingsJson?.company?.tank_capacities)
+        ? settingsJson.company.tank_capacities
+        : Array.isArray(settingsJson?.company?.tankCapacities)
+        ? settingsJson.company.tankCapacities
+        : [];
+
+      const settingsRows = Array.isArray(settingsJson?.tanks)
+        ? settingsJson.tanks
+        : [];
+
+      const normalizedSetup: TankSetupItem[] = Array.from(
+        { length: tanksCount },
+        (_, i) => {
+          const row = settingsRows[i];
+
+          if (!row) {
+            return {
+              ...makeDefaultTank(i),
+              capacityLiters: Number(tankCapacities[i]) || 1000,
+            };
+          }
+
+          return {
+            id: String(row.id ?? `tank-${i + 1}`),
+            name: String(
+              row.tank_name ?? row.name ?? `Tank ${i + 1}`
+            ).trim(),
+            capacityLiters:
+              Number(row.capacity_liters ?? row.capacityLiters) ||
+              Number(tankCapacities[i]) ||
+              1000,
+            variant: "rect",
+            metrics: [
+              {
+                channel: String(
+                  row.volume_channel ?? row.volumeChannel ?? `CH${i * 2 + 1}`
+                ).trim(),
+                type: "volume",
+                unit: (String(
+                  row.volume_unit ?? row.volumeUnit ?? "L"
+                ).trim() || "L") as VolumeUnit,
+              },
+              {
+                channel: String(
+                  row.temperature_channel ??
+                    row.temperatureChannel ??
+                    `CH${i * 2 + 2}`
+                ).trim(),
+                type: "temperature",
+                unit: (String(
+                  row.temperature_unit ?? row.temperatureUnit ?? "°C"
+                ).trim() || "°C") as TemperatureUnit,
+              },
+            ],
+          };
+        }
+      );
+
+      setSetupTanks(normalizedSetup);
+      setAlarmMap(
+        settingsJson?.alarms && typeof settingsJson.alarms === "object"
+          ? settingsJson.alarms
+          : {}
+      );
+
+      const influxRes = await fetch("/api/influx/latest", { cache: "no-store" });
+      const influxJson = await influxRes.json().catch(() => ({}));
+
+      if (!influxRes.ok) {
+        setErr(influxJson?.error || "Failed to load Influx data");
         setTanks([]);
         return;
       }
 
-      const rows = Array.isArray(j?.rows) ? j.rows : [];
+      const rows = Array.isArray(influxJson?.rows) ? influxJson.rows : [];
 
-      const mapped: Tank[] = setup.tanks.map((cfg) => {
-        const volumeMetric = getVolumeMetric(cfg);
-        const temperatureMetric = getTemperatureMetric(cfg);
+      const mapped: Tank[] = normalizedSetup.map((cfg) => {
+        const volumeMetric = cfg.metrics[0];
+        const temperatureMetric = cfg.metrics[1];
 
         const volumeRow = rows.find((r: any) => r.channel === volumeMetric.channel);
-        const temperatureRow = rows.find((r: any) => r.channel === temperatureMetric.channel);
+        const temperatureRow = rows.find(
+          (r: any) => r.channel === temperatureMetric.channel
+        );
 
         const volumeRaw = toNumber(volumeRow?._value);
         const temperatureRaw = toNumber(temperatureRow?._value);
 
-        const level =
-          volumeRaw !== undefined
-            ? getVolumePercentFromMetric(volumeRaw, cfg, volumeMetric)
-            : 0;
-
         const volumeLiters =
           volumeRaw !== undefined
-            ? getVolumeLitersFromMetric(volumeRaw, cfg, volumeMetric)
+            ? convertVolumeToLiters(
+                volumeRaw,
+                volumeMetric.unit,
+                cfg.capacityLiters
+              )
+            : 0;
+
+        const level =
+          volumeRaw !== undefined
+            ? getVolumePercent(
+                volumeRaw,
+                volumeMetric.unit,
+                cfg.capacityLiters
+              )
             : 0;
 
         const temperatureC =
           temperatureRaw !== undefined
-            ? getTemperatureCFromMetric(temperatureRaw, temperatureMetric)
+            ? convertTemperatureToC(temperatureRaw, temperatureMetric.unit)
             : undefined;
 
         return {
@@ -122,6 +257,8 @@ export default function CompanyDashboardPage() {
     } catch {
       setErr("Network error");
       setTanks([]);
+      setSetupTanks([]);
+      setAlarmMap({});
     } finally {
       setLoading(false);
     }
@@ -129,7 +266,7 @@ export default function CompanyDashboardPage() {
 
   async function logoutCompany() {
     await fetch("/api/company/logout", { method: "POST" }).catch(() => {});
-    window.location.href = "/company/login";
+    window.location.href = "/login";
   }
 
   useEffect(() => {
@@ -140,21 +277,6 @@ export default function CompanyDashboardPage() {
     return () => clearInterval(t);
   }, [slug]);
 
-  useEffect(() => {
-    if (!slug) return;
-
-    const refresh = () => setAlarmMap(loadAlarmMapForSlug(slug));
-    refresh();
-
-    window.addEventListener("storage", refresh);
-    window.addEventListener("tankco:alarm-limits-changed", refresh as EventListener);
-
-    return () => {
-      window.removeEventListener("storage", refresh);
-      window.removeEventListener("tankco:alarm-limits-changed", refresh as EventListener);
-    };
-  }, [slug]);
-
   return (
     <main className="relative min-h-screen overflow-hidden text-white">
       <BackgroundFX />
@@ -163,7 +285,7 @@ export default function CompanyDashboardPage() {
         <TopHero
           brand="Tankco."
           ctaLabel="Logout"
-          onCtaClickHref="/company/login"
+          onCtaClickHref="/login"
           eyebrow="COMPANY DASHBOARD"
           titleLine1="Tank"
           titleLine2="Dashboard"
@@ -186,7 +308,9 @@ export default function CompanyDashboardPage() {
         <section id="tanks" className="mx-auto max-w-6xl px-6 pb-20 pt-10">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <h2 className="text-xl font-semibold text-white md:text-2xl">Live Tanks</h2>
+              <h2 className="text-xl font-semibold text-white md:text-2xl">
+                Live Tanks
+              </h2>
               <p className="mt-1 text-sm text-white/55">
                 Showing current configured volume and temperature channels from InfluxDB.
               </p>
@@ -217,8 +341,11 @@ export default function CompanyDashboardPage() {
                       <span className="text-red-200">— {a.reason}</span>
                     </div>
                     <div className="text-white/55">
-                      Value: {typeof a.volumeL === "number" ? `${a.volumeL}` : "--"} • Temp:{" "}
-                      {typeof a.temperatureC === "number" ? `${a.temperatureC}°C` : "--"}
+                      Value:{" "}
+                      {typeof a.volumeL === "number" ? `${a.volumeL}` : "--"} • Temp:{" "}
+                      {typeof a.temperatureC === "number"
+                        ? `${a.temperatureC}°C`
+                        : "--"}
                     </div>
                   </div>
                 ))}

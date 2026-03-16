@@ -23,7 +23,10 @@ export default function AdminDashboardPage() {
   const [companyLoginId, setCompanyLoginId] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
 
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    loginId: string;
+    password: string;
+  } | null>(null);
 
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -58,7 +61,7 @@ export default function AdminDashboardPage() {
 
   async function addCompany() {
     setErr("");
-    setTempPassword(null);
+    setCreatedCredentials(null);
 
     const cleanName = name.trim();
     const cleanLoginId = companyLoginId.trim();
@@ -89,12 +92,16 @@ export default function AdminDashboardPage() {
 
       const j = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
+      if (!res.ok || !j?.ok) {
         setErr(j?.error ?? "Failed to create company");
         return;
       }
 
-      setTempPassword(j?.tempPassword ?? null);
+      setCreatedCredentials({
+        loginId: j?.credentials?.loginId ?? "",
+        password: j?.credentials?.password ?? "",
+      });
+
       setName("");
       setCompanyLoginId("");
       setLogoUrl("");
@@ -152,7 +159,7 @@ export default function AdminDashboardPage() {
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" }).catch(() => {});
-    window.location.href = "/admin/login";
+    window.location.href = "/login";
   }
 
   return (
@@ -163,7 +170,7 @@ export default function AdminDashboardPage() {
         <TopHero
           brand="Tankco."
           ctaLabel="Logout"
-          onCtaClickHref="/admin/login"
+          onCtaClickHref="/login"
           eyebrow="ADMIN PANEL"
           titleLine1="Company"
           titleLine2="Management"
@@ -240,17 +247,28 @@ export default function AdminDashboardPage() {
                   {loading ? "Creating…" : "Create"}
                 </button>
 
-                {tempPassword && (
+                {createdCredentials && (
                   <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
                     <div className="text-xs text-emerald-200/80">
+                      Company credentials
+                    </div>
+
+                    <div className="mt-3 text-xs text-emerald-200/70">
+                      Login ID
+                    </div>
+                    <div className="mt-1 font-mono text-sm text-emerald-100">
+                      {createdCredentials.loginId}
+                    </div>
+
+                    <div className="mt-3 text-xs text-emerald-200/70">
                       Temporary password
                     </div>
                     <div className="mt-1 font-mono text-sm text-emerald-100">
-                      {tempPassword}
+                      {createdCredentials.password}
                     </div>
+
                     <div className="mt-2 text-xs text-emerald-200/60">
-                      Copy now and share with the company. It won’t be shown
-                      again.
+                      Copy now and share with the company. It won’t be shown again.
                     </div>
                   </div>
                 )}

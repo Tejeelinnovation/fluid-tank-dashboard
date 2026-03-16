@@ -35,12 +35,12 @@ export default async function CompanySlugLayout({
 
   // No company login -> send to company login
   if (!companySessionId) {
-    redirect("/company/login");
+    redirect("/login");
   }
 
   // Company can access only its own slug
   if (companySessionId !== company.id) {
-    redirect("/company/login");
+    redirect("/login");
   }
 
   return <>{children}</>;

@@ -1,55 +1,48 @@
 import "server-only";
-import { readCompanies, writeCompanies, slugify, type Company } from "./dbCompanies";
+import {
+  createCompany,
+  deleteCompany as deleteCompanyDb,
+  readCompanies,
+} from "@/lib/dbCompanies";
 
-export type BasicCompany = {
+export type Company = {
   id: string;
   name: string;
   logoUrl?: string;
 };
 
-export async function getCompanies(): Promise<BasicCompany[]> {
-  const { companies } = await readCompanies();
-
-  return companies.map((company) => ({
-    id: company.id,
-    name: company.name,
-    logoUrl: company.logoUrl,
+export async function getCompanies(): Promise<Company[]> {
+  const db = await readCompanies();
+  return db.companies.map((c) => ({
+    id: c.id,
+    name: c.name,
+    logoUrl: c.logoUrl,
   }));
 }
 
-export async function addCompany(
-  input: Omit<BasicCompany, "id">
-): Promise<BasicCompany> {
-  const { companies } = await readCompanies();
+export async function addCompany(input: {
+  name: string;
+  logoUrl?: string;
+}) {
+  const base = input.name.trim().toLowerCase().replace(/\s+/g, "");
 
-  const newCompany: Company = {
-    id: crypto.randomUUID(),
-    name: input.name.trim(),
-    slug: slugify(input.name),
-    logoUrl: input.logoUrl?.trim() || "",
-    companyLoginId: "",
-    passwordHash: "",
-    tanksCount: 0,
-    tankCapacities: [],
-    csvPath: "",
+  const created = await createCompany({
+    name: input.name,
+    logoUrl: input.logoUrl,
+    companyLoginId: `${base}_login`,
+    passwordHash: "change-me",
+    tanksCount: 1,
+    tankCapacities: [1000],
     dataMode: "generated",
-    createdAt: new Date().toISOString(),
-  };
-
-  companies.unshift(newCompany);
-  await writeCompanies({ companies });
+  });
 
   return {
-    id: newCompany.id,
-    name: newCompany.name,
-    logoUrl: newCompany.logoUrl,
+    id: created.id,
+    name: created.name,
+    logoUrl: created.logoUrl,
   };
 }
 
 export async function deleteCompany(id: string) {
-  const { companies } = await readCompanies();
-
-  await writeCompanies({
-    companies: companies.filter((company) => company.id !== id),
-  });
+  await deleteCompanyDb(id);
 }

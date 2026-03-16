@@ -31,10 +31,6 @@ export type SavedSetup = {
 export const VOLUME_UNITS: VolumeUnit[] = ["L", "%", "m³"];
 export const TEMPERATURE_UNITS: TemperatureUnit[] = ["°C", "°F"];
 
-function getSetupKey(slug: string) {
-  return `tankco_company_setup_${slug}`;
-}
-
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -60,7 +56,7 @@ export function makeDefaultTank(i: number): TankSetupItem {
   };
 }
 
-function normalizeVolumeMetric(
+export function normalizeVolumeMetric(
   metric: any,
   fallbackChannel: string
 ): TankSetupItem["metrics"][0] {
@@ -72,7 +68,7 @@ function normalizeVolumeMetric(
   };
 }
 
-function normalizeTemperatureMetric(
+export function normalizeTemperatureMetric(
   metric: any,
   fallbackChannel: string
 ): TankSetupItem["metrics"][1] {
@@ -84,7 +80,7 @@ function normalizeTemperatureMetric(
   };
 }
 
-function normalizeTank(
+export function normalizeTank(
   t: Partial<TankSetupItem> | undefined,
   i: number
 ): TankSetupItem {
@@ -102,7 +98,7 @@ function normalizeTank(
   };
 }
 
-function makeDefaultSetup(count = 4): SavedSetup {
+export function makeDefaultSetup(count = 4): SavedSetup {
   const tanks = Array.from({ length: count }, (_, i) => makeDefaultTank(i));
   return {
     tanksCount: count,
@@ -183,60 +179,4 @@ export function getVolumeMetric(tank: TankSetupItem) {
 
 export function getTemperatureMetric(tank: TankSetupItem) {
   return tank.metrics[1];
-}
-
-export function readCompanySetupClient(slug: string): SavedSetup {
-  if (!slug) {
-    return makeDefaultSetup(4);
-  }
-
-  try {
-    const raw = localStorage.getItem(getSetupKey(slug));
-
-    if (!raw) {
-      return makeDefaultSetup(4);
-    }
-
-    const j = JSON.parse(raw) as SavedSetup;
-    const tanksCount = clamp(Number(j?.tanksCount) || 4, 1, 20);
-
-    if (Array.isArray(j?.tanks)) {
-      const tanks = Array.from({ length: tanksCount }, (_, i) =>
-        normalizeTank(j.tanks?.[i], i)
-      );
-
-      return {
-        tanksCount,
-        tanks,
-        updatedAt: j?.updatedAt || new Date().toISOString(),
-      };
-    }
-
-    return makeDefaultSetup(tanksCount);
-  } catch {
-    return makeDefaultSetup(4);
-  }
-}
-
-export function writeCompanySetupClient(
-  slug: string,
-  tanksCount: number,
-  tanks: TankSetupItem[]
-) {
-  if (!slug) return;
-
-  try {
-    const safeCount = clamp(Number(tanksCount) || 4, 1, 20);
-    const safeTanks = Array.from({ length: safeCount }, (_, i) =>
-      normalizeTank(tanks?.[i], i)
-    );
-
-    const payload: SavedSetup = {
-      tanksCount: safeCount,
-      tanks: safeTanks,
-      updatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(getSetupKey(slug), JSON.stringify(payload));
-  } catch {}
 }
