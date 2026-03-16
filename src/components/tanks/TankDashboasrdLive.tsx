@@ -4,35 +4,63 @@ import * as React from "react";
 import { useParams } from "next/navigation";
 import TankGrid, { type AlarmEvent, type Tank } from "./TankGrid";
 import TankDetailsModal from "./TankDetailsModal";
-import {
-  readCompanySetupClient,
-  getVolumeMetric,
-  getTemperatureMetric,
-  getVolumePercentFromMetric,
-  getTemperatureCFromMetric,
-  getVolumeLitersFromMetric,
-} from "@/lib/companySetupClient";
-import { loadAlarmMap } from "@/lib/alarmStore";
 import type { TankAlarmLimits } from "@/types/alarm";
+import type {
+  TankSetupItem,
+  VolumeUnit,
+  TemperatureUnit,
+} from "@/lib/companySetupClient";
 
 function toNumber(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
 }
 
-function getAlarmKey(slug: string) {
-  return `tankco_alarm_map_${slug}`;
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
-function loadAlarmMapForSlug(slug: string): Record<string, TankAlarmLimits> {
-  try {
-    const raw = localStorage.getItem(getAlarmKey(slug));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+function makeDefaultTank(i: number): TankSetupItem {
+  return {
+    id: `tank-${i + 1}`,
+    name: `Tank ${i + 1}`,
+    capacityLiters: 1000,
+    variant: "rect",
+    metrics: [
+      {
+        channel: `CH${i * 2 + 1}`,
+        type: "volume",
+        unit: "L",
+      },
+      {
+        channel: `CH${i * 2 + 2}`,
+        type: "temperature",
+        unit: "°C",
+      },
+    ],
+  };
+}
+
+function convertVolumeToLiters(
+  raw: number,
+  unit: VolumeUnit,
+  capacityLiters: number
+) {
+  if (unit === "L") return raw;
+  if (unit === "%") return (raw / 100) * capacityLiters;
+  if (unit === "m³") return raw * 1000;
+  return raw;
+}
+
+function convertTemperatureToC(raw: number, unit: TemperatureUnit) {
+  if (unit === "°F") return ((raw - 32) * 5) / 9;
+  return raw;
+}
+
+function getVolumePercent(raw: number, unit: VolumeUnit, capacityLiters: number) {
+  const liters = convertVolumeToLiters(raw, unit, capacityLiters);
+  if (!(capacityLiters > 0)) return 0;
+  return clamp((liters / capacityLiters) * 100, 0, 100);
 }
 
 export default function TankDashboardLive() {
@@ -42,43 +70,131 @@ export default function TankDashboardLive() {
   const [loading, setLoading] = React.useState(true);
   const [tanks, setTanks] = React.useState<Tank[]>([]);
   const [selectedTank, setSelectedTank] = React.useState<Tank | null>(null);
-  const [alarmMap, setAlarmMap] = React.useState<Record<string, TankAlarmLimits>>({});
+  const [alarmMap, setAlarmMap] = React.useState<Record<string, TankAlarmLimits>>(
+    {}
+  );
   const [alarmEvents, setAlarmEvents] = React.useState<AlarmEvent[]>([]);
 
   const loadAll = React.useCallback(async () => {
     if (!slug) return;
 
     try {
-      const setup = readCompanySetupClient(slug);
+      setLoading(true);
 
-      const res = await fetch("/api/influx/latest", { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
+      const settingsRes = await fetch("/api/company/settings", {
+        cache: "no-store",
+      });
+      const settingsJson = await settingsRes.json().catch(() => ({}));
 
-      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      if (!settingsRes.ok || !settingsJson?.ok) {
+        throw new Error(settingsJson?.error || "Failed to load company settings");
+      }
 
-      const mapped: Tank[] = setup.tanks.map((cfg) => {
-        const volumeMetric = getVolumeMetric(cfg);
-        const temperatureMetric = getTemperatureMetric(cfg);
+      const tanksCount = clamp(
+        Number(
+          settingsJson?.company?.tanks_count ??
+            settingsJson?.company?.tanksCount ??
+            4
+        ),
+        1,
+        20
+      );
+
+      const tankCapacities = Array.isArray(settingsJson?.company?.tank_capacities)
+        ? settingsJson.company.tank_capacities
+        : Array.isArray(settingsJson?.company?.tankCapacities)
+        ? settingsJson.company.tankCapacities
+        : [];
+
+      const settingsRows = Array.isArray(settingsJson?.tanks)
+        ? settingsJson.tanks
+        : [];
+
+      const setupTanks: TankSetupItem[] = Array.from({ length: tanksCount }, (_, i) => {
+        const row = settingsRows[i];
+
+        if (!row) {
+          return {
+            ...makeDefaultTank(i),
+            capacityLiters: Number(tankCapacities[i]) || 1000,
+          };
+        }
+
+        return {
+          id: String(row.id ?? `tank-${i + 1}`),
+          name: String(row.tank_name ?? row.name ?? `Tank ${i + 1}`).trim(),
+          capacityLiters:
+            Number(row.capacity_liters ?? row.capacityLiters) ||
+            Number(tankCapacities[i]) ||
+            1000,
+          variant: "rect",
+          metrics: [
+            {
+              channel: String(
+                row.volume_channel ?? row.volumeChannel ?? `CH${i * 2 + 1}`
+              ).trim(),
+              type: "volume",
+              unit: (String(
+                row.volume_unit ?? row.volumeUnit ?? "L"
+              ).trim() || "L") as VolumeUnit,
+            },
+            {
+              channel: String(
+                row.temperature_channel ??
+                  row.temperatureChannel ??
+                  `CH${i * 2 + 2}`
+              ).trim(),
+              type: "temperature",
+              unit: (String(
+                row.temperature_unit ?? row.temperatureUnit ?? "°C"
+              ).trim() || "°C") as TemperatureUnit,
+            },
+          ],
+        };
+      });
+
+      const influxRes = await fetch("/api/influx/latest", { cache: "no-store" });
+      const influxJson = await influxRes.json().catch(() => ({}));
+
+      if (!influxRes.ok) {
+        throw new Error(influxJson?.error || "Failed to load Influx data");
+      }
+
+      const rows = Array.isArray(influxJson?.rows) ? influxJson.rows : [];
+
+      const mapped: Tank[] = setupTanks.map((cfg: TankSetupItem) => {
+        const volumeMetric = cfg.metrics[0];
+        const temperatureMetric = cfg.metrics[1];
 
         const volumeRow = rows.find((r: any) => r.channel === volumeMetric.channel);
-        const temperatureRow = rows.find((r: any) => r.channel === temperatureMetric.channel);
+        const temperatureRow = rows.find(
+          (r: any) => r.channel === temperatureMetric.channel
+        );
 
         const volumeRaw = toNumber(volumeRow?._value);
         const temperatureRaw = toNumber(temperatureRow?._value);
 
-        const level =
-          volumeRaw !== undefined
-            ? getVolumePercentFromMetric(volumeRaw, cfg, volumeMetric)
-            : 0;
-
         const volumeLiters =
           volumeRaw !== undefined
-            ? getVolumeLitersFromMetric(volumeRaw, cfg, volumeMetric)
+            ? convertVolumeToLiters(
+                volumeRaw,
+                volumeMetric.unit,
+                cfg.capacityLiters
+              )
+            : 0;
+
+        const level =
+          volumeRaw !== undefined
+            ? getVolumePercent(
+                volumeRaw,
+                volumeMetric.unit,
+                cfg.capacityLiters
+              )
             : 0;
 
         const temperatureC =
           temperatureRaw !== undefined
-            ? getTemperatureCFromMetric(temperatureRaw, temperatureMetric)
+            ? convertTemperatureToC(temperatureRaw, temperatureMetric.unit)
             : undefined;
 
         return {
@@ -104,10 +220,15 @@ export default function TankDashboardLive() {
       });
 
       setTanks(mapped);
-      setAlarmMap(loadAlarmMapForSlug(slug));
+      setAlarmMap(
+        settingsJson?.alarms && typeof settingsJson.alarms === "object"
+          ? settingsJson.alarms
+          : {}
+      );
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
       setTanks([]);
+      setAlarmMap({});
     } finally {
       setLoading(false);
     }
@@ -117,26 +238,9 @@ export default function TankDashboardLive() {
     if (!slug) return;
 
     loadAll();
-
-    const onStorage = () => {
-      setAlarmMap(loadAlarmMapForSlug(slug));
-    };
-
-    const onAlarmChanged = () => {
-      setAlarmMap(loadAlarmMapForSlug(slug));
-    };
-
-    window.addEventListener("storage", onStorage);
-    window.addEventListener("tankco:alarm-limits-changed", onAlarmChanged as EventListener);
-
     const interval = window.setInterval(loadAll, 10000);
 
     return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(
-        "tankco:alarm-limits-changed",
-        onAlarmChanged as EventListener
-      );
       window.clearInterval(interval);
     };
   }, [slug, loadAll]);
