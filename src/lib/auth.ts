@@ -20,5 +20,31 @@ export async function setAdminSession() {
 
 export async function clearAdminSession() {
   const store = await cookies();
-  store.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+  store.set(COOKIE_NAME, "", {
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+export function getAdminLoginId() {
+  return String(process.env.ADMIN_LOGIN_ID || "admin").trim().toLowerCase();
+}
+
+export function getAdminPassword() {
+  return String(process.env.ADMIN_PASSWORD || "").trim();
+}
+
+export function normalizeLoginId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+export function isValidAdminCredentials(loginId: string, password: string) {
+  return (
+    normalizeLoginId(loginId) === getAdminLoginId() &&
+    password.trim() === getAdminPassword()
+  );
 }

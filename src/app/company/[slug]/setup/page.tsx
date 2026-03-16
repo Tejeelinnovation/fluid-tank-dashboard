@@ -24,22 +24,8 @@ type TankSetupItem = {
   ];
 };
 
-type SavedSetup = {
-  tanksCount: number;
-  tanks: TankSetupItem[];
-  updatedAt: string;
-};
-
 const VOLUME_UNITS: VolumeUnit[] = ["L", "%", "m³"];
 const TEMPERATURE_UNITS: TemperatureUnit[] = ["°C", "°F"];
-
-function getSetupKey(slug: string) {
-  return `tankco_company_setup_${slug}`;
-}
-
-function getAlarmKey(slug: string) {
-  return `tankco_alarm_map_${slug}`;
-}
 
 function makeDefaultTank(i: number): TankSetupItem {
   return {
@@ -62,7 +48,10 @@ function makeDefaultTank(i: number): TankSetupItem {
   };
 }
 
-function normalizeVolumeMetric(metric: any, fallbackChannel: string): TankSetupItem["metrics"][0] {
+function normalizeVolumeMetric(
+  metric: any,
+  fallbackChannel: string
+): TankSetupItem["metrics"][0] {
   const unit = VOLUME_UNITS.includes(metric?.unit) ? metric.unit : "L";
   return {
     channel: String(metric?.channel ?? fallbackChannel).trim(),
@@ -71,7 +60,10 @@ function normalizeVolumeMetric(metric: any, fallbackChannel: string): TankSetupI
   };
 }
 
-function normalizeTemperatureMetric(metric: any, fallbackChannel: string): TankSetupItem["metrics"][1] {
+function normalizeTemperatureMetric(
+  metric: any,
+  fallbackChannel: string
+): TankSetupItem["metrics"][1] {
   const unit = TEMPERATURE_UNITS.includes(metric?.unit) ? metric.unit : "°C";
   return {
     channel: String(metric?.channel ?? fallbackChannel).trim(),
@@ -80,7 +72,10 @@ function normalizeTemperatureMetric(metric: any, fallbackChannel: string): TankS
   };
 }
 
-function normalizeTank(t: Partial<TankSetupItem> | undefined, i: number): TankSetupItem {
+function normalizeTank(
+  t: Partial<TankSetupItem> | undefined,
+  i: number
+): TankSetupItem {
   const metrics = Array.isArray(t?.metrics) ? t!.metrics : [];
 
   return {
@@ -93,59 +88,6 @@ function normalizeTank(t: Partial<TankSetupItem> | undefined, i: number): TankSe
       normalizeTemperatureMetric(metrics[1], `CH${i * 2 + 2}`),
     ],
   };
-}
-
-function readSavedSetup(slug: string): SavedSetup | null {
-  try {
-    const raw = localStorage.getItem(getSetupKey(slug));
-    if (!raw) return null;
-
-    const j = JSON.parse(raw) as SavedSetup;
-    if (!j || typeof j !== "object") return null;
-    if (typeof j.tanksCount !== "number") return null;
-
-    const tanksCount = clamp(Math.round(j.tanksCount), 1, 20);
-    const tanks = Array.from({ length: tanksCount }, (_, i) =>
-      normalizeTank(j.tanks?.[i], i)
-    );
-
-    return {
-      tanksCount,
-      tanks,
-      updatedAt: j.updatedAt || new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeSavedSetup(slug: string, tanksCount: number, tanks: TankSetupItem[]) {
-  try {
-    const payload: SavedSetup = {
-      tanksCount,
-      tanks,
-      updatedAt: new Date().toISOString(),
-    };
-    localStorage.setItem(getSetupKey(slug), JSON.stringify(payload));
-  } catch {}
-}
-
-function loadAlarmMapForSlug(slug: string): AlarmMap {
-  try {
-    const raw = localStorage.getItem(getAlarmKey(slug));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveAlarmMapForSlug(slug: string, map: AlarmMap) {
-  try {
-    localStorage.setItem(getAlarmKey(slug), JSON.stringify(map));
-    window.dispatchEvent(new Event("tankco:alarm-limits-changed"));
-  } catch {}
 }
 
 function tankKey(i: number) {
@@ -198,7 +140,11 @@ function getTankValidationError(tank: TankSetupItem): string | null {
   return null;
 }
 
-function buildCanonicalAlarmMap(source: AlarmMap, tanks: TankSetupItem[], tanksCount: number): AlarmMap {
+function buildCanonicalAlarmMap(
+  source: AlarmMap,
+  tanks: TankSetupItem[],
+  tanksCount: number
+): AlarmMap {
   const next: AlarmMap = {};
 
   for (let i = 0; i < tanksCount; i++) {
@@ -248,29 +194,128 @@ export default function CompanySetupPage() {
 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     if (!slug) return;
 
-    const saved = readSavedSetup(slug);
-    if (saved) {
-      setTanksCount(saved.tanksCount);
-      setTanks(saved.tanks);
-      setApplyAllCap(saved.tanks?.[0]?.capacityLiters ?? 1000);
+    let cancelled = false;
 
-      const loadedAlarmMap = loadAlarmMapForSlug(slug);
-      setAlarmMap(buildCanonicalAlarmMap(loadedAlarmMap, saved.tanks, saved.tanksCount));
-      return;
+    async function loadFromServer() {
+      try {
+        setInitialLoading(true);
+        setMsg(null);
+
+        const res = await fetch("/api/company/settings", {
+          cache: "no-store",
+        });
+
+        const j = await res.json().catch(() => ({}));
+
+        if (!res.ok || !j?.ok) {
+          throw new Error(j?.error || "Failed to load settings");
+        }
+
+        const countFromCompany = clamp(
+          Number(j?.company?.tanks_count ?? j?.company?.tanksCount ?? 4),
+          1,
+          20
+        );
+
+        const tankCapacities = Array.isArray(j?.company?.tank_capacities)
+          ? j.company.tank_capacities
+          : Array.isArray(j?.company?.tankCapacities)
+          ? j.company.tankCapacities
+          : [];
+
+        const serverTanks = Array.isArray(j?.tanks) ? j.tanks : [];
+        const nextTanks = Array.from({ length: countFromCompany }, (_, i) => {
+          const fromApi = serverTanks[i];
+
+          if (fromApi) {
+            return normalizeTank(
+              {
+                id: fromApi.id ?? `tank-${i + 1}`,
+                name: fromApi.name ?? fromApi.tank_name ?? `Tank ${i + 1}`,
+                capacityLiters:
+                  Number(fromApi.capacityLiters ?? fromApi.capacity_liters) ||
+                  Number(tankCapacities[i]) ||
+                  1000,
+                variant: "rect",
+                metrics: [
+                  {
+                    channel:
+                      fromApi.metrics?.[0]?.channel ??
+                      fromApi.volumeChannel ??
+                      fromApi.volume_channel ??
+                      `CH${i * 2 + 1}`,
+                    type: "volume",
+                    unit:
+                      fromApi.metrics?.[0]?.unit ??
+                      fromApi.volumeUnit ??
+                      fromApi.volume_unit ??
+                      "L",
+                  },
+                  {
+                    channel:
+                      fromApi.metrics?.[1]?.channel ??
+                      fromApi.temperatureChannel ??
+                      fromApi.temperature_channel ??
+                      `CH${i * 2 + 2}`,
+                    type: "temperature",
+                    unit:
+                      fromApi.metrics?.[1]?.unit ??
+                      fromApi.temperatureUnit ??
+                      fromApi.temperature_unit ??
+                      "°C",
+                  },
+                ],
+              },
+              i
+            );
+          }
+
+          return normalizeTank(
+            {
+              ...makeDefaultTank(i),
+              capacityLiters: Number(tankCapacities[i]) || 1000,
+            },
+            i
+          );
+        });
+
+        const nextAlarmMap = buildCanonicalAlarmMap(
+          (j?.alarms ?? {}) as AlarmMap,
+          nextTanks,
+          countFromCompany
+        );
+
+        if (!cancelled) {
+          setTanksCount(countFromCompany);
+          setTanks(nextTanks);
+          setApplyAllCap(nextTanks?.[0]?.capacityLiters ?? 1000);
+          setAlarmMap(nextAlarmMap);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setMsg({
+            type: "err",
+            text: e?.message || "Failed to load settings",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setInitialLoading(false);
+        }
+      }
     }
 
-    const defaults = [
-      makeDefaultTank(0),
-      makeDefaultTank(1),
-      makeDefaultTank(2),
-      makeDefaultTank(3),
-    ];
-    setAlarmMap(buildCanonicalAlarmMap(loadAlarmMapForSlug(slug), defaults, 4));
+    loadFromServer();
+
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
   const totalCapacity = useMemo(
@@ -284,7 +329,9 @@ export default function CompanySetupPage() {
 
   function syncTanksToCount(nextCount: number) {
     setTanks((prev) => {
-      const nextTanks = Array.from({ length: nextCount }, (_, i) => normalizeTank(prev[i], i));
+      const nextTanks = Array.from({ length: nextCount }, (_, i) =>
+        normalizeTank(prev[i], i)
+      );
 
       setAlarmMap((prevAlarmMap) =>
         buildCanonicalAlarmMap(prevAlarmMap, nextTanks, nextCount)
@@ -306,7 +353,11 @@ export default function CompanySetupPage() {
     });
   }
 
-  function updateVolumeMetricField(tankIndex: number, field: "channel" | "unit", value: string) {
+  function updateVolumeMetricField(
+    tankIndex: number,
+    field: "channel" | "unit",
+    value: string
+  ) {
     setTanks((prev) => {
       const copy = [...prev];
       const tank = { ...copy[tankIndex] };
@@ -324,7 +375,11 @@ export default function CompanySetupPage() {
     });
   }
 
-  function updateTemperatureMetricField(tankIndex: number, field: "channel" | "unit", value: string) {
+  function updateTemperatureMetricField(
+    tankIndex: number,
+    field: "channel" | "unit",
+    value: string
+  ) {
     setTanks((prev) => {
       const copy = [...prev];
       const tank = { ...copy[tankIndex] };
@@ -417,31 +472,35 @@ export default function CompanySetupPage() {
 
     const canonicalAlarmMap = buildCanonicalAlarmMap(alarmMap, cleanTanks, cleanCount);
 
-    writeSavedSetup(slug, cleanCount, cleanTanks);
-    saveAlarmMapForSlug(slug, canonicalAlarmMap);
-    setAlarmMap(canonicalAlarmMap);
+    try {
+      const res = await fetch("/api/company/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          tanksCount: cleanCount,
+          tankCapacities: cleanTanks.map((t) => t.capacityLiters),
+          tanks: cleanTanks,
+          alarms: canonicalAlarmMap,
+        }),
+      });
 
-    const res = await fetch("/api/company/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        slug,
-        tanksCount: cleanCount,
-        tankCapacities: cleanTanks.map((t) => t.capacityLiters),
-        tanks: cleanTanks,
-      }),
-    });
+      const j = await res.json().catch(() => ({}));
 
-    const j = await res.json().catch(() => ({}));
-    setSaving(false);
+      setSaving(false);
 
-    if (!res.ok) {
-      setMsg({ type: "err", text: j?.error ?? "Failed to save settings" });
-      return;
+      if (!res.ok || !j?.ok) {
+        setMsg({ type: "err", text: j?.error ?? "Failed to save settings" });
+        return;
+      }
+
+      setAlarmMap(canonicalAlarmMap);
+      setMsg({ type: "ok", text: "Saved ✅ Redirecting…" });
+      window.location.href = `/company/${slug}/dashboard`;
+    } catch {
+      setSaving(false);
+      setMsg({ type: "err", text: "Failed to save settings" });
     }
-
-    setMsg({ type: "ok", text: "Saved ✅ Redirecting…" });
-    window.location.href = `/company/${slug}/dashboard`;
   }
 
   async function uploadCSV(file: File) {
@@ -454,7 +513,11 @@ export default function CompanySetupPage() {
     fd.append("file", file);
     fd.append("slug", slug);
 
-    const res = await fetch("/api/company/upload-csv", { method: "POST", body: fd });
+    const res = await fetch("/api/company/upload-csv", {
+      method: "POST",
+      body: fd,
+    });
+
     const j = await res.json().catch(() => ({}));
     setUploading(false);
 
@@ -492,6 +555,12 @@ export default function CompanySetupPage() {
               <p className="mt-1 text-sm text-white/55">
                 Set tank count, names, fixed volume/temperature channels, units, capacities, and alarms.
               </p>
+
+              {initialLoading && (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/70">
+                  Loading saved settings…
+                </div>
+              )}
 
               <div className="mt-6">
                 <div className="flex items-center justify-between">
@@ -611,7 +680,7 @@ export default function CompanySetupPage() {
 
               <button
                 onClick={saveAndGo}
-                disabled={saving}
+                disabled={saving || initialLoading}
                 className="mt-6 w-full rounded-2xl bg-white py-3 font-semibold text-black disabled:opacity-60"
               >
                 {saving ? "Saving…" : "Save & Go to Dashboard"}
